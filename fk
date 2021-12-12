@@ -9,6 +9,7 @@ import time
 
 UPLOAD_CHUNK_SIZE = 1024 * 1024
 FK_API = 'http://localhost:8000'
+FK_API_KEY = '1234'
 
 SESSION_COOKIE = 'fk:session'
 CSRF_COOKIE = 'fk:csrf'
@@ -53,6 +54,22 @@ def upload_file(file_path: str):
     while tus_uploader.offset < file_size:
         tus_uploader.upload_chunk()
         progress_bar.update(UPLOAD_CHUNK_SIZE)
+    progress_bar.close()
+
+    upload_id = tus_uploader.url.split('/')[-1]
+
+    while True:
+        time.sleep(1)
+
+        new_id_req = requests.get(
+            f'{FK_API}/videos/media/tus/{upload_id}', headers={'X-API-Key': FK_API_KEY})
+        if new_id_req.ok:
+            print(new_id_req.content)
+            return new_id_req.content
+
+        print(new_id_req)
+        print("video not yet registered in system, waiting...")
+        time.sleep(5)
 
 
 if __name__ == '__main__':
