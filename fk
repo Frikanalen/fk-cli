@@ -4,7 +4,6 @@ from tqdm import tqdm
 from tusclient import client
 import requests
 import os
-import sys
 import time
 
 UPLOAD_CHUNK_SIZE = 1024 * 1024
@@ -14,15 +13,19 @@ FK_API_KEY = '1234'
 SESSION_COOKIE = 'fk:session'
 CSRF_COOKIE = 'fk:csrf'
 
-csrf = 'a0395ef18bf33a0bcf6792084d6158a25f54e0d78a1f5da17ef93da65e4c2ef05abceb7e0509cec087aefbab7e7ad653718a9753d00743d70075babaaab2fe97'
-session = 'f6444c4b-ab03-4e92-b42d-a3c88a96413f'
+
+def open_session(email, password):
+    session_req = requests.post(
+        f'{FK_API}/auth/login',
+        {'email': email, 'password': password}
+    )
+
+    return (session_req.cookies[SESSION_COOKIE], session_req.cookies[CSRF_COOKIE])
 
 
 def get_frikanalen_tus_client():
     def _encode_cookies(cookies: dict) -> str:
         return '; '.join(['='.join(cookie) for cookie in cookies.items()])
-
-    print(_encode_cookies({SESSION_COOKIE: session, CSRF_COOKIE: csrf}))
 
     tus_cookies = _encode_cookies({
         SESSION_COOKIE: session,
@@ -54,6 +57,7 @@ def upload_file(file_path: str):
     while tus_uploader.offset < file_size:
         tus_uploader.upload_chunk()
         progress_bar.update(UPLOAD_CHUNK_SIZE)
+
     progress_bar.close()
 
     upload_id = tus_uploader.url.split('/')[-1]
@@ -62,9 +66,12 @@ def upload_file(file_path: str):
         time.sleep(1)
 
         new_id_req = requests.get(
-            f'{FK_API}/videos/media/tus/{upload_id}', headers={'X-API-Key': FK_API_KEY})
+            f'{FK_API}/videos/media/tus/{upload_id}',
+            headers={'X-API-Key': FK_API_KEY}
+        )
+
         if new_id_req.ok:
-            print(new_id_req.content)
+            print(new_id_req.json)
             return new_id_req.content
 
         print(new_id_req)
@@ -73,4 +80,5 @@ def upload_file(file_path: str):
 
 
 if __name__ == '__main__':
+    session, csrf = open_session('dev-admin@frikanalen.no', 'dev-admin')
     upload_file('../CLUNKS-_8R64-WZwjw.mp4')
