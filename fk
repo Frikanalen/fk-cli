@@ -1,0 +1,50 @@
+#!/usr/bin/env python3
+
+from tqdm import tqdm
+from tusclient import client
+import requests
+import os
+import sys
+import time
+
+UPLOAD_CHUNK_SIZE = 1024 * 1024
+FK_API = 'http://localhost:8000'
+SESSION_COOKIE = 'fk:session'
+CSRF_COOKIE = 'fk:csrf'
+
+csrf = 'a1c990ee67a7cb570ef011347a0b7b9407390a11109d6f0afa7611adab566a72e8db5872d20618cbbaf412761d06b66d69a0caca759a864504c1008e3d0c6eb0'
+session = 'f39b1b8a-a1dd-4cff-9a22-d23013b67b36'
+
+
+def _encode_cookies(cookies: dict) -> str:
+    return '; '.join(['='.join(cookie) for cookie in cookies.items()])
+
+
+print(_encode_cookies({SESSION_COOKIE: session, CSRF_COOKIE: csrf}))
+tus_client = client.TusClient(f'{FK_API}/videos/upload/',
+                              headers={
+                                  'Cookie':
+                                  _encode_cookies({
+                                      SESSION_COOKIE: session,
+                                      CSRF_COOKIE: csrf
+                                  }),
+                                  'X-CSRF-Token':
+                                  csrf,
+                              })
+
+file_path = 'test.mp4'
+file_name = os.path.basename(file_path)
+file_size = os.stat(file_path).st_size
+file_stream = open(file_path, 'rb')
+
+tus_uploader = tus_client.uploader(file_stream=file_stream,
+                                   chunk_size=UPLOAD_CHUNK_SIZE,
+                                   metadata={'fileName': file_name})
+
+progress_bar = tqdm(total=file_size, unit_scale=True, unit='B')
+
+chunks_uploaded = 0
+
+while tus_uploader.offset < file_size:
+    tus_uploader.upload_chunk()
+    progress_bar.update(UPLOAD_CHUNK_SIZE)
