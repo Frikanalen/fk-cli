@@ -10,4 +10,5 @@ I'm probably going to rewrite this in Go or something.
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
+pip install git+https://github.com/tus/tus-py-client
 ```
