@@ -5,6 +5,7 @@ from tusclient import client
 import requests
 import os
 import time
+import json
 
 UPLOAD_CHUNK_SIZE = 1024 * 1024
 FK_API = 'http://localhost:8000'
@@ -60,6 +61,13 @@ def upload_file(file_path: str):
         progress_bar.update(UPLOAD_CHUNK_SIZE)
 
     progress_bar.close()
+
+    last_response = tus_uploader.request
+    if last_response.status_code == 200:
+        print("Uploaded with ID", json.loads(
+            last_response.response_content)['id'])
+    else:
+        raise Exception('upload failed')
 
 
 if __name__ == '__main__':
