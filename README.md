@@ -8,6 +8,6 @@ I'm probably going to rewrite this in Go or something.
 
 ```bash
 python3 -m venv .venv
-. venv/bin/activate
+. .venv/bin/activate
 pip install -r requirements.txt
 ```

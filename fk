@@ -8,6 +8,7 @@ import time
 
 UPLOAD_CHUNK_SIZE = 1024 * 1024
 FK_API = 'http://localhost:8000'
+MEDIA_API = 'http://localhost:8001'
 FK_API_KEY = '1234'
 
 SESSION_COOKIE = 'fk:session'
@@ -37,7 +38,7 @@ def get_frikanalen_tus_client():
         'X-CSRF-Token': csrf,
     }
 
-    return client.TusClient(f'{FK_API}/videos/upload/', tus_headers)
+    return client.TusClient(f'{MEDIA_API}/upload/video/', tus_headers)
 
 
 def get_frikanalen_tus_uploader(file_path: str):
@@ -60,25 +61,7 @@ def upload_file(file_path: str):
 
     progress_bar.close()
 
-    upload_id = tus_uploader.url.split('/')[-1]
-
-    while True:
-        time.sleep(1)
-
-        new_id_req = requests.get(
-            f'{FK_API}/videos/media/tus/{upload_id}',
-            headers={'X-API-Key': FK_API_KEY}
-        )
-
-        if new_id_req.ok:
-            print(new_id_req.json)
-            return new_id_req.content
-
-        print(new_id_req)
-        print("video not yet registered in system, waiting...")
-        time.sleep(5)
-
 
 if __name__ == '__main__':
     session, csrf = open_session('dev-admin@frikanalen.no', 'dev-admin')
-    upload_file('../CLUNKS-_8R64-WZwjw.mp4')
+    upload_file('test.mp4')
