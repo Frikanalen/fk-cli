@@ -7,4 +7,4 @@ from session import FrikanalenSession
 
 if __name__ == '__main__':
     fk = FrikanalenSession('dev-admin@frikanalen.no', 'dev-admin')
-    upload_testvideo(fk)
+    print(upload_testvideo(fk))

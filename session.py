@@ -63,6 +63,6 @@ class FrikanalenSession:
 
         last_response = tus_uploader.request
         if last_response.status_code == 200:
-            print(json.loads(last_response.response_content)['id'])
+            return json.loads(last_response.response_content)['id']
         else:
             raise Exception('upload failed')
