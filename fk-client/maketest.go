@@ -1,8 +1,6 @@
-import ffmpeg
-import os
-import tempfile
-from session import FrikanalenSession
+package fk
 
+/*
 
 def get_font():
     try:
@@ -35,11 +33,4 @@ def make_testvideo(duration: float, text: str, filepath: str):
         .overwrite_output()
         .run()
     )
-
-
-def upload_testvideo(session: FrikanalenSession):
-
-    with tempfile.TemporaryDirectory(prefix="fk-cli") as tmpdirname:
-        test_file = os.path.join(tmpdirname, "testfile.mxf")
-        make_testvideo(1, "hello\nheloasdfasdfdf", test_file)
-        return session.upload_file(test_file)
+*/
