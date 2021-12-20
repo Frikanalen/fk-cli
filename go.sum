@@ -429,6 +429,8 @@ github.com/subosito/gotenv v1.2.0/go.mod h1:N0PQaV/YGNqwC0u51sEeR/aUtSLEXKX9iv69
 github.com/syndtr/goleveldb v1.0.0/go.mod h1:ZVVdQEZoIme9iO1Ch2Jdy24qqXrMMOU6lpPAyBWyWuQ=
 github.com/toresbe/go-tus v0.0.0-20211218010840-a06ddd17bf44 h1:VQ+MKxDSAThHwkSozDDfjgl+Dkm6p9GYR8x49z4BoeM=
 github.com/toresbe/go-tus v0.0.0-20211218010840-a06ddd17bf44/go.mod h1:h4FlUg/DOfezaNjaRR82kn/VflerOqpg1YXENLjRk18=
+github.com/toresbe/go-tus v0.0.0-20211218015247-e8ee194af5e3 h1:LhQZzHSPhODtJ1db77q4kjn9k4GAVsVCc5oewfrL0u4=
+github.com/toresbe/go-tus v0.0.0-20211218015247-e8ee194af5e3/go.mod h1:h4FlUg/DOfezaNjaRR82kn/VflerOqpg1YXENLjRk18=
 github.com/tus/tusd v1.1.0/go.mod h1:3DWPOdeCnjBwKtv98y5dSws3itPqfce5TVa0s59LRiA=
 github.com/tv42/httpunix v0.0.0-20150427012821-b75d8614f926/go.mod h1:9ESjWnEqriFuLhtthL60Sar/7RFoluCcXsuvEwTV5KM=
 github.com/u2takey/ffmpeg-go v0.4.0 h1:fiDzfer3IJkfGO9YcPg3tp1yMyfzh6zXw0TwjMROL7c=

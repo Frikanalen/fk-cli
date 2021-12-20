@@ -12,9 +12,7 @@ require (
 	github.com/spf13/cobra v1.3.0
 	github.com/spf13/pflag v1.0.5
 	github.com/spf13/viper v1.10.0
-	github.com/toresbe/go-tus v0.0.0-20211218010840-a06ddd17bf44
+	github.com/toresbe/go-tus v0.0.0-20211218015247-e8ee194af5e3
 	github.com/u2takey/ffmpeg-go v0.4.0
 	golang.org/x/tools v0.1.5
 )
-
-replace github.com/toresbe/go-tus v0.0.0-20211218010840-a06ddd17bf44 => /home/toresbe/go-tus

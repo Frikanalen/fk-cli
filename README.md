@@ -3,8 +3,9 @@
 ## Installation
 
 ```bash
+sudo apt install golang
 make
-sudo make install
+sudo make -e PREFIX=/usr install
 ```
 
 ## Install linter
