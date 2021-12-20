@@ -21,35 +21,49 @@ func checkErr(err error) {
 	}
 }
 
+func getUserID() *int {
+	client, err := fk.Open()
+	checkErr(err)
+
+	userResponse, err := client.UserProfile(context.Background())
+	checkErr(err)
+
+	userProfile, err := fk.ParseUserProfileResponse(userResponse)
+	checkErr(err)
+
+	return (*userProfile.JSON200).User.Id
+}
+
+func getUserOrganizations() []fk.Organization {
+	client, err := fk.Open()
+	checkErr(err)
+
+	userId := getUserID()
+
+	orgResponse, err := client.GetOrganizations(context.Background(), &fk.GetOrganizationsParams{Editor: userId})
+	checkErr(err)
+
+	orgData, err := fk.ParseGetOrganizationsResponse(orgResponse)
+	checkErr(err)
+
+	return *orgData.JSON200.Rows
+}
+
 // listCmd represents the list command
 var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List organizations associated with user",
 	Run: func(cmd *cobra.Command, args []string) {
-		client, err := fk.Open()
-		checkErr(err)
-
-		userResponse, err := client.UserProfile(context.Background())
-		checkErr(err)
-
-		userProfile, err := fk.ParseUserProfileResponse(userResponse)
-		checkErr(err)
-
-		userId := (*userProfile.JSON200).User.Id
-
-		orgResponse, err := client.GetOrganizations(context.Background(), &fk.GetOrganizationsParams{Editor: userId})
-		checkErr(err)
-
-		orgData, err := fk.ParseGetOrganizationsResponse(orgResponse)
-		checkErr(err)
+		organizations := getUserOrganizations()
 
 		t := table.NewWriter()
 		t.SetOutputMirror(os.Stdout)
 		t.AppendHeader(table.Row{"active", "org id", "name"})
 
-		for _, org := range *orgData.JSON200.Rows {
+		for _, org := range organizations {
 			t.AppendRow(table.Row{"", *org.Id, *org.Name})
 		}
+
 		t.SetStyle(table.StyleColoredBlackOnRedWhite)
 		t.Render()
 	},
