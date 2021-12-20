@@ -5,8 +5,10 @@ Copyright © 2021 NAME HERE <EMAIL ADDRESS>
 package cmd
 
 import (
+	"fmt"
 	"github/frikanalen/fk-cli/fk-client"
-	"log"
+
+	log "github.com/sirupsen/logrus"
 
 	"github.com/spf13/cobra"
 )
@@ -21,14 +23,17 @@ var uploadCmd = &cobra.Command{
 			log.Fatal(err)
 			return
 		}
-		log.Println(session.Upload(cmd.Flag("file").Value.String()))
+		upload, err := session.Upload(cmd.Flag("file").Value.String())
+		if err != nil {
+			log.Fatal(err)
+			return
+		}
+		fmt.Println(upload.MediaId)
 	},
 }
 
 func init() {
-	rootCmd.AddCommand(uploadCmd)
-	uploadCmd.Flags().Float32("generateDummy", 0.0, "Generate an n-second test video (for developer use)")
+	mediaCmd.AddCommand(uploadCmd)
 	uploadCmd.Flags().StringP("file", "f", "", "Path to file to upload")
-	uploadCmd.Flags().StringP("title", "t", "", "Title of video")
-	uploadCmd.MarkFlagRequired("title")
+	uploadCmd.MarkFlagRequired("file")
 }

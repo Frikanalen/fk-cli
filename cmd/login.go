@@ -6,11 +6,11 @@ package cmd
 
 import (
 	"github/frikanalen/fk-cli/fk-client"
+	"os"
 
 	log "github.com/sirupsen/logrus"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 var loginCmd = &cobra.Command{
@@ -18,14 +18,16 @@ var loginCmd = &cobra.Command{
 	Short: "Authenticate against the API",
 	Long:  `Stores a session ID in your configuration file.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		session := fk.FrikanalenSession{}
-		sessionID, err := session.Login("dev-admin@frikanalen.no", "dev-admin")
+		client, err := fk.Open()
 		if err != nil {
-			log.Fatalf("could not log in %w", err)
-			return
+			log.Fatalf("could not open session, %w", err)
+			os.Exit(1)
 		}
-		viper.Set("sessionID", sessionID)
-		viper.WriteConfig()
+		err = client.Login("dev-admin@frikanalen.no", "dev-admin")
+		if err != nil {
+			log.Fatalf("could not login, %w", err)
+			os.Exit(1)
+		}
 		log.Infoln("login successful")
 	},
 }

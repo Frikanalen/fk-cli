@@ -1,7 +1,7 @@
 package fk
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 
+	openapi_types "github.com/deepmap/oapi-codegen/pkg/types"
 	"github.com/spf13/viper"
 	"github.com/toresbe/go-tus"
 )
@@ -24,6 +25,7 @@ type UploadResponse struct {
 	MediaId int    `json:"id"`
 	JobId   string `json:"job"`
 }
+
 type transport struct {
 	underlyingTransport http.RoundTripper
 }
@@ -34,103 +36,150 @@ func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return t.underlyingTransport.RoundTrip(req)
 }
 
-func (s *FrikanalenSession) getClient() *http.Client {
-	if s.client == nil {
-		jar, _ := cookiejar.New(nil)
+func getClient(apiURL *url.URL, sessionID *string) *http.Client {
+	jar, _ := cookiejar.New(nil)
+
+	if sessionID != nil {
 		sessionCookie := &http.Cookie{
 			Name:     "fk-session",
-			Value:    s.sessionID,
+			Value:    *sessionID,
 			HttpOnly: true,
 		}
-
-		jar.SetCookies(s.apiURL, []*http.Cookie{sessionCookie})
-		client := &http.Client{Jar: jar, Transport: &transport{underlyingTransport: http.DefaultTransport}}
-		s.client = client
-		return client
-	} else {
-		return s.client
+		jar.SetCookies(apiURL, []*http.Cookie{sessionCookie})
 	}
+
+	client := &http.Client{Jar: jar, Transport: &transport{underlyingTransport: http.DefaultTransport}}
+
+	return client
 }
 
-func Open() (*FrikanalenSession, error) {
-	s := FrikanalenSession{}
+func getSessionID() *string {
+	if viper.IsSet("sessionID") {
+		retval := new(string)
+		*retval = viper.GetString("sessionID")
+		return retval
+	}
+
+	return nil
+}
+
+func Open() (*Client, error) {
+	apiURL, err := url.Parse(viper.GetString("API"))
+	if err != nil {
+		return nil, err
+	}
+
+	c := Client{
+		Server: apiURL.String(),
+		Client: getClient(apiURL, getSessionID()),
+	}
+
+	return &c, nil
+}
+
+func (c *Client) Login(Email openapi_types.Email, Password string) error {
+	resp, err := c.LoginUser(context.Background(), LoginUserJSONRequestBody{
+		Email,
+		Password,
+	})
+
+	if err != nil {
+		return err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		text, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			return err
+		}
+
+		return fmt.Errorf("login returned %s, %s", resp.Status, text)
+
+	}
+
+	for _, v := range resp.Cookies() {
+		if v.Name == "fk-session" {
+			viper.Set("sessionID", v.Value)
+			viper.WriteConfig()
+			return nil
+		}
+	}
+
+	return fmt.Errorf("did not get fk-session cookie")
+
+}
+
+/*
+func (s *FrikanalenSession) CreateVideo(Organization int, Categories []int, Title string, Description string, MediaId int) (int, error) {
+	s.client = s.getClient()
+
+	type videorequest struct {
+		Title       string `json:"title"`
+		Description string `json:"description"`
+		MediaId     int    `json:"mediaId"`
+		Categories  []int  `json:"categories"`
+	}
+
+	body, err := json.Marshal(videorequest{
+		Title,
+		Description,
+		MediaId,
+		Categories,
+	})
+	log.Println(string(body))
+	if err != nil {
+		return 0, err
+	}
+
+	videoCreatePath, _ := url.Parse(fmt.Sprintf("/organizations/%d/videos", Organization))
+
+	resp, err := s.client.Post(
+		s.apiURL.ResolveReference(videoCreatePath).String(),
+		"application/json",
+		bytes.NewBuffer(body),
+	)
+
+	if err != nil {
+		return 0, err
+	}
+
+	text, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return 0, err
+	}
+
+	if resp.StatusCode != http.StatusCreated {
+		return 0, fmt.Errorf(
+			"could not create video, http %d: %s",
+			resp.StatusCode,
+			text,
+		)
+	}
+
+	log.Println(string(text))
+	return 1337, nil
+}
+*/
+
+func (c *Client) Upload(filespec string) (*UploadResponse, error) {
+	f, err := os.Open(filespec)
+
+	if err != nil {
+		return nil, err
+	}
+
+	defer f.Close()
+
+	config := tus.DefaultConfig()
 
 	apiURL, err := url.Parse(viper.GetString("API"))
 	if err != nil {
 		return nil, err
 	}
 
-	s.apiURL = apiURL
-	if viper.IsSet("sessionID") {
-		s.sessionID = viper.GetString("sessionID")
-	}
+	config.HttpClient = getClient(apiURL, getSessionID())
 
-	return &s, nil
-}
-
-func (s *FrikanalenSession) Login(email string, password string) (string, error) {
-	s.client = s.getClient()
-
-	type loginrequest struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
-	}
-
-	body, err := json.Marshal(loginrequest{
-		Email:    email,
-		Password: password,
-	})
-
-	if err != nil {
-		return "", err
-	}
-
-	loginEndpoint, _ := url.Parse("/auth/login")
-
-	resp, err := s.client.Post(
-		s.apiURL.ResolveReference(loginEndpoint).String(),
-		"application/json",
-		bytes.NewBuffer(body),
-	)
-
-	if err != nil {
-		return "", err
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		text, err := ioutil.ReadAll(resp.Body)
-		if err != nil {
-			return "", err
-		}
-
-		return "", fmt.Errorf("login returned %s, %s", resp.Status, text)
-
-	}
-
-	for _, v := range resp.Cookies() {
-		if v.Name == "fk-session" {
-			s.sessionID = v.Value
-			return v.Value, nil
-		}
-	}
-
-	return "", fmt.Errorf("did not get fk-session cookie")
-
-}
-
-func (s *FrikanalenSession) Upload(filespec string) (*UploadResponse, error) {
-	f, err := os.Open(filespec)
-
-	if err != nil {
-		panic(err)
-	}
-
-	defer f.Close()
-
-	config := tus.DefaultConfig()
-	config.HttpClient = s.getClient()
-
-	endpoint := s.apiURL.String() + "/upload/video"
+	endpoint := c.Server + "/upload/video"
 	// create the tus client.
 	client, err := tus.NewClient(endpoint, config)
 	if err != nil {
