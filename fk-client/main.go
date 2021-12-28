@@ -179,9 +179,10 @@ func (c *Client) Upload(filespec string) (*UploadResponse, error) {
 
 	config.HttpClient = getClient(apiURL, getSessionID())
 
-	endpoint := c.Server + "/upload/video"
+	apiURL.Path = "/upload/video"
+
 	// create the tus client.
-	client, err := tus.NewClient(endpoint, config)
+	client, err := tus.NewClient(apiURL.String(), config)
 	if err != nil {
 		return nil, err
 	}

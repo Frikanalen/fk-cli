@@ -19,6 +19,8 @@ func main() {
 	viper.SetConfigName(".frikanalen")
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath(os.Getenv("HOME"))
+        viper.SetEnvPrefix("fk")
+        viper.BindEnv("api")
 	viper.SetDefault("API", "http://localhost:8000")
 
 	if err := viper.ReadInConfig(); err != nil {
