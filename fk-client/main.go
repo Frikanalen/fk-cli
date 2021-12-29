@@ -105,61 +105,8 @@ func (c *Client) Login(Email openapi_types.Email, Password string) error {
 		}
 	}
 
-	return fmt.Errorf("did not get fk-session cookie")
-
+	return nil
 }
-
-/*
-func (s *FrikanalenSession) CreateVideo(Organization int, Categories []int, Title string, Description string, MediaId int) (int, error) {
-	s.client = s.getClient()
-
-	type videorequest struct {
-		Title       string `json:"title"`
-		Description string `json:"description"`
-		MediaId     int    `json:"mediaId"`
-		Categories  []int  `json:"categories"`
-	}
-
-	body, err := json.Marshal(videorequest{
-		Title,
-		Description,
-		MediaId,
-		Categories,
-	})
-	log.Println(string(body))
-	if err != nil {
-		return 0, err
-	}
-
-	videoCreatePath, _ := url.Parse(fmt.Sprintf("/organizations/%d/videos", Organization))
-
-	resp, err := s.client.Post(
-		s.apiURL.ResolveReference(videoCreatePath).String(),
-		"application/json",
-		bytes.NewBuffer(body),
-	)
-
-	if err != nil {
-		return 0, err
-	}
-
-	text, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return 0, err
-	}
-
-	if resp.StatusCode != http.StatusCreated {
-		return 0, fmt.Errorf(
-			"could not create video, http %d: %s",
-			resp.StatusCode,
-			text,
-		)
-	}
-
-	log.Println(string(text))
-	return 1337, nil
-}
-*/
 
 func (c *Client) Upload(filespec string) (*UploadResponse, error) {
 	f, err := os.Open(filespec)
@@ -177,12 +124,13 @@ func (c *Client) Upload(filespec string) (*UploadResponse, error) {
 		return nil, err
 	}
 
-	config.HttpClient = getClient(apiURL, getSessionID())
+	uploadURL := apiURL
+	uploadURL.Path = "/upload/video"
 
-	apiURL.Path = "/upload/video"
+	config.HttpClient = getClient(uploadURL, getSessionID())
 
 	// create the tus client.
-	client, err := tus.NewClient(apiURL.String(), config)
+	client, err := tus.NewClient(uploadURL.String(), config)
 	if err != nil {
 		return nil, err
 	}
@@ -210,21 +158,3 @@ func (c *Client) Upload(filespec string) (*UploadResponse, error) {
 
 	return &response, nil
 }
-
-/*
-func main() {
-	session := FrikanalenSession{}
-
-	err := session.Login("dev-admin@frikanalen.no", "dev-admin")
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	upload, err := session.Upload()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	log.Println(upload)
-}
-*/
