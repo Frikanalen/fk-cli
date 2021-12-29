@@ -30,14 +30,14 @@ func makeTestvideo(duration float64, text string, filepath string) error {
 	text = strings.ReplaceAll(text, "'", `\'`)
 	text = strings.ReplaceAll(text, "\n", `\n`) + "\n"
 
-	ffmpeg.
+	err := ffmpeg.
 		Input(fmt.Sprintf("testsrc=duration=%f:size=1280x720:rate=50", duration), ffmpeg.KwArgs{"f": "lavfi"}).
 		Drawtext(text+`%{pts\:hms}`, 0, 0, false, textoptions).
-		Output(filepath).
+		Output(filepath, ffmpeg.KwArgs{"pix_fmt": "yuv422p"}).
 		OverWriteOutput().ErrorToStdOut().
 		Run()
 
-	return nil
+	return err
 }
 
 func getFont() string {
