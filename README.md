@@ -1,9 +1,24 @@
 # Frikanalen command line utility
 
+
+## Requirements
+
+ffmpeg is only required for test video generation.
+
+### Debian
+
+```
+sudo apt install golang ffmpeg
+```
+
+### MacOS
+```
+brew install golang ffmpeg
+```
+
 ## Installation
 
 ```bash
-sudo apt install golang
 make
 sudo make -e PREFIX=/usr install
 ```
