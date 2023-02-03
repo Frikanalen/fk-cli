@@ -21,7 +21,7 @@ func main() {
 	viper.AddConfigPath(os.Getenv("HOME"))
 	viper.SetEnvPrefix("fk")
 	viper.BindEnv("api")
-	viper.SetDefault("API", "http://localhost:8000")
+	viper.SetDefault("API", "http://localhost:8080")
 
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
