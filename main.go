@@ -1,6 +1,5 @@
 /*
 Copyright © 2021 NAME HERE <EMAIL ADDRESS>
-
 */
 package main
 
@@ -20,18 +19,23 @@ func main() {
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath(os.Getenv("HOME"))
 	viper.SetEnvPrefix("fk")
-	viper.BindEnv("api")
+	_ = viper.BindEnv("api")
 	viper.SetDefault("API", "http://localhost:8080")
 
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-			err = viper.WriteConfigAs(path.Join(os.Getenv("HOME"), ".frikanalen.yaml"))
+			newConfigFile := path.Join(os.Getenv("HOME"), ".frikanalen.yaml")
+			err = viper.WriteConfigAs(newConfigFile)
 			if err != nil {
-				log.Fatalf("could not write configuration file %w", err)
+				log.Fatalln("could not write configuration file %w", err)
+			} else {
+				log.Infoln("Created configuration file", newConfigFile)
 			}
 		} else {
-			log.Fatalf("could not read config file, %w", err)
+			log.Fatalln("could not read config file, %w", err)
 		}
+	} else {
+		log.Infoln("Loading configuration file", viper.ConfigFileUsed())
 	}
 
 	cmd.Execute()

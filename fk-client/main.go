@@ -11,15 +11,10 @@ import (
 	"os"
 
 	openapi_types "github.com/deepmap/oapi-codegen/pkg/types"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/toresbe/go-tus"
 )
-
-type FrikanalenSession struct {
-	sessionID string
-	apiURL    *url.URL
-	client    *http.Client
-}
 
 type UploadResponse struct {
 	MediaId int    `json:"id"`
@@ -65,6 +60,7 @@ func getSessionID() *string {
 
 func Open() (*Client, error) {
 	apiURL, err := url.Parse(viper.GetString("API"))
+
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +96,10 @@ func (c *Client) Login(Email openapi_types.Email, Password string) error {
 	for _, v := range resp.Cookies() {
 		if v.Name == "fk-session" {
 			viper.Set("sessionID", v.Value)
-			viper.WriteConfig()
+			err = viper.WriteConfig()
+			if err != nil {
+				log.Warnln("Could not write config file", viper.ConfigFileUsed())
+			}
 			return nil
 		}
 	}
@@ -154,7 +153,11 @@ func (c *Client) Upload(filespec string) (*UploadResponse, error) {
 	}
 
 	response := UploadResponse{}
-	json.Unmarshal(client.Response, &response)
+
+	err = json.Unmarshal(client.Response, &response)
+	if err != nil {
+		return nil, err
+	}
 
 	return &response, nil
 }

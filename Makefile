@@ -11,7 +11,7 @@ clean:
 	rm fk
 
 schema:
-	wget -q http://localhost:8000/open-api-spec.json -O schema.json
+	wget -q http://localhost:8080/open-api-spec.json -O schema.json
 	oapi-codegen -package fk -o fk-client/client.gen.go schema.json 
 
 test:

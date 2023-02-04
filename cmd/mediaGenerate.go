@@ -1,6 +1,5 @@
 /*
 Copyright © 2021 NAME HERE <EMAIL ADDRESS>
-
 */
 package cmd
 
@@ -8,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	ffmpeg "github.com/u2takey/ffmpeg-go"
 )
@@ -51,11 +51,14 @@ var generateCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Println("generate called")
 		duration, _ := cmd.Flags().GetFloat64("seconds")
-		makeTestvideo(
+		err := makeTestvideo(
 			duration,
 			cmd.Flag("text").Value.String(),
 			cmd.Flag("output").Value.String(),
 		)
+		if err != nil {
+			log.Errorln("generete test media failed, %w", err)
+		}
 	},
 }
 
@@ -64,5 +67,5 @@ func init() {
 	generateCmd.Flags().Float64P("seconds", "s", 10.0, "duration of video")
 	generateCmd.Flags().StringP("text", "t", "test video", "text to superimpose")
 	generateCmd.Flags().StringP("output", "o", "", "output file path")
-	uploadCmd.MarkFlagRequired("output")
+	_ = uploadCmd.MarkFlagRequired("output")
 }

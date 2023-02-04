@@ -81,13 +81,13 @@ var createCmd = &cobra.Command{
 func init() {
 	videoCmd.AddCommand(createCmd)
 	createCmd.Flags().StringP("title", "t", "", "Title of video")
-	createCmd.MarkFlagRequired("title")
+	_ = createCmd.MarkFlagRequired("title")
 	createCmd.Flags().StringP("description", "d", "", "Description of video")
 	createCmd.Flags().IntP("orgId", "o", 0, "Organization ID")
-	createCmd.MarkFlagRequired("orgId")
+	_ = createCmd.MarkFlagRequired("orgId")
 	createCmd.Flags().IntSliceP("categoryIds", "c", []int{}, "List of categories")
-	createCmd.MarkFlagRequired("categoryIds")
+	_ = createCmd.MarkFlagRequired("categoryIds")
 	createCmd.Flags().IntP("mediaId", "m", 0, "Media ID")
-	createCmd.MarkFlagRequired("mediaId")
+	_ = createCmd.MarkFlagRequired("mediaId")
 	createCmd.Flags().BoolP("jukeboxable", "j", false, "allow automatic scheduling")
 }

@@ -1,6 +1,5 @@
 /*
 Copyright © 2021 NAME HERE <EMAIL ADDRESS>
-
 */
 package cmd
 
@@ -35,5 +34,5 @@ var uploadCmd = &cobra.Command{
 func init() {
 	mediaCmd.AddCommand(uploadCmd)
 	uploadCmd.Flags().StringP("file", "f", "", "Path to file to upload")
-	uploadCmd.MarkFlagRequired("file")
+	_ = uploadCmd.MarkFlagRequired("file")
 }

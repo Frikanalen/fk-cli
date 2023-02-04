@@ -1,6 +1,5 @@
 /*
 Copyright © 2021 NAME HERE <EMAIL ADDRESS>
-
 */
 package cmd
 
@@ -15,17 +14,17 @@ import (
 
 var loginCmd = &cobra.Command{
 	Use:   "login",
-	Short: "Authenticate against the API",
-	Long:  `Stores a session ID in your configuration file.`,
+	Short: "Authenticate test user against the API",
+	Long:  `Stores a session ID in your configuration file. Currently hardcoded to dev admin user`,
 	Run: func(cmd *cobra.Command, args []string) {
 		client, err := fk.Open()
 		if err != nil {
-			log.Fatalf("could not open session, %w", err)
+			log.Fatalln("could not open session, %w", err)
 			os.Exit(1)
 		}
 		err = client.Login("dev-admin@frikanalen.no", "dev-admin")
 		if err != nil {
-			log.Fatalf("could not login, %w", err)
+			log.Fatalln("could not login, %w", err)
 			os.Exit(1)
 		}
 		log.Infoln("login successful")
