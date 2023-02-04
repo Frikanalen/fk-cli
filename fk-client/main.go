@@ -17,8 +17,8 @@ import (
 )
 
 type UploadResponse struct {
-	MediaId int    `json:"id"`
-	JobId   string `json:"job"`
+	MediaId int `json:"mediaId"`
+	JobId   int `json:"jobId"`
 }
 
 type transport struct {
@@ -143,6 +143,7 @@ func (c *Client) Upload(filespec string) (*UploadResponse, error) {
 	// create the uploader.
 	uploader, err := client.CreateUpload(upload)
 	if err != nil {
+		log.Warnf("%s", client.Response)
 		return nil, err
 	}
 

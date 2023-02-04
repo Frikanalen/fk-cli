@@ -22,7 +22,9 @@ var uploadCmd = &cobra.Command{
 			log.Fatal(err)
 			return
 		}
-		upload, err := session.Upload(cmd.Flag("file").Value.String())
+		fileSpec := cmd.Flag("file").Value.String()
+		log.Infoln("Uploading file", fileSpec)
+		upload, err := session.Upload(fileSpec)
 		if err != nil {
 			log.Fatal(err)
 			return
