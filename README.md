@@ -9,6 +9,10 @@ If there is functionality you'd like to see, please file an issue - or even bett
 
 ffmpeg is only required for test video generation.
 
+We use a custom branch of go-tus to get support for content returned by HTTP 200.
+
+TODO: Review my fork of go-tus and put it into a state possible to merge
+
 ## Installation
 
 You need a Go compiler - and if you want to generate test media you'll need ffmpeg.
