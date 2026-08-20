@@ -18,10 +18,6 @@ that same file.
 
 ffmpeg is only required for test video generation.
 
-We use a custom branch of go-tus to get support for content returned by HTTP 200.
-
-TODO: Review my fork of go-tus and put it into a state possible to merge
-
 ### Refreshing the API schema and regenerating the client
 
 The repo keeps a checked-in OpenAPI snapshot in `schema.yaml`, matching the pattern used in
@@ -81,5 +77,5 @@ brew install golangci-lint
 ### Linux I guess:
 
 ```bash
-curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.43.0
+curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.13.1
 ```
