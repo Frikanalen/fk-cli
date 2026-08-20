@@ -1,31 +1,54 @@
-/*
-Copyright © 2021 NAME HERE <EMAIL ADDRESS>
-*/
 package cmd
 
 import (
-	"github/frikanalen/fk-cli/fk-client"
+	"context"
+	"fmt"
 	"os"
 
-	log "github.com/sirupsen/logrus"
+	"github/frikanalen/fk-cli/fk-client"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
+	"golang.org/x/term"
 )
 
 var loginCmd = &cobra.Command{
 	Use:   "login",
-	Short: "Authenticate test user against the API",
-	Long:  `Stores a session ID in your configuration file. Currently hardcoded to dev admin user`,
+	Short: "Authenticate against the API",
+	Long:  `Obtains an auth token and stores it in your configuration file.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		client, err := fk.Open()
 		if err != nil {
-			log.Fatalln("could not open session, %w", err)
-			os.Exit(1)
+			log.Fatalln("could not open session:", err)
 		}
-		err = client.Login("dev-admin@frikanalen.no", "dev-admin")
+
+		email, err := cmd.Flags().GetString("email")
 		if err != nil {
-			log.Fatalln("could not login, %w", err)
-			os.Exit(1)
+			log.Fatalln(err)
+		}
+
+		password, err := cmd.Flags().GetString("password")
+		if err != nil {
+			log.Fatalln(err)
+		}
+		if password == "" {
+			fmt.Print("Password: ")
+			passwordBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
+			fmt.Println()
+			if err != nil {
+				log.Fatalln("could not read password:", err)
+			}
+			password = string(passwordBytes)
+		}
+
+		if err := client.Login(context.Background(), email, password); err != nil {
+			log.Fatalln("could not login:", err)
+		}
+
+		viper.Set("token", client.Token())
+		if err := viper.WriteConfig(); err != nil {
+			log.Fatalln("could not save token:", err)
 		}
 		log.Infoln("login successful")
 	},
@@ -34,13 +57,7 @@ var loginCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(loginCmd)
 
-	// Here you will define your flags and configuration settings.
-
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// loginCmd.PersistentFlags().String("foo", "", "A help for foo")
-
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	// loginCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	loginCmd.Flags().StringP("email", "e", "", "Email address")
+	_ = loginCmd.MarkFlagRequired("email")
+	loginCmd.Flags().StringP("password", "p", "", "Password (omit to be prompted)")
 }
