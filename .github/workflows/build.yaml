@@ -2,6 +2,8 @@ name: fk-cli build
 
 on:
   push:
+    branches:
+      - main
   pull_request:
   workflow_dispatch:
 
@@ -9,6 +11,13 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
+
+# A new push to a branch makes the run already in flight for it pointless.
+# Never cancel on main, though: that run may be release-please part-way
+# through cutting a tag and a release.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   build:
