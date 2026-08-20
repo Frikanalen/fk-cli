@@ -4,34 +4,40 @@ ifeq ($(PREFIX),)
     PREFIX := /usr/local
 endif
 
-fk: main.go fk-client/*.go cmd/*.go
+fk: generate main.go fk-client/*.go cmd/*.go
 	go build -o fk .
 
 clean:
-	rm fk
+	rm -f fk
+	rm -rf fk-client/generated
 
+# Fetches the current OpenAPI schema from a running backend into schema.yaml.
 schema:
-	wget -q http://localhost:8080/open-api-spec.json -O schema.json
-	oapi-codegen -package fk -o fk-client/client.gen.go schema.json 
+	./update-schema.sh $(if $(API),$(API)/api/schema/)
 
-test:
+# Regenerates the Go API client from the schema.yaml checked into the repo.
+generate:
+	./generate-client.sh
+
+test: generate
 	go test ./...
 
-test_coverage:
+test_coverage: generate
 	go test ./... -coverprofile=coverage.out
 
 dep:
-	go get github.com/deepmap/oapi-codegen/cmd/oapi-codegen
 	go mod download
 
-run:
+run: generate
 	go run .
 
-vet:
-	go vet
+vet: generate
+	go vet ./...
 
-lint:
+lint: generate
 	${GOPATH}/bin/golangci-lint run
 
 install: fk
 	install -m 755 fk $(PREFIX)/bin/fk
+
+.PHONY: fk clean schema generate test test_coverage dep run vet lint install

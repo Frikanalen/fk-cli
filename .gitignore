@@ -1,4 +1,6 @@
 *.mp4
 .vscode
 fk
-schema.json
+
+# Generated API client -- regenerate with ./generate-client.sh
+/fk-client/generated/
