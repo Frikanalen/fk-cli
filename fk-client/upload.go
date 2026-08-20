@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/toresbe/go-tus"
+	"github.com/eventials/go-tus"
 )
 
 // Upload fetches an upload token for videoId and streams filespec to the
@@ -23,7 +23,7 @@ func (c *Client) Upload(ctx context.Context, videoId int, filespec string) error
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	fi, err := f.Stat()
 	if err != nil {
@@ -46,7 +46,10 @@ func (c *Client) Upload(ctx context.Context, videoId int, filespec string) error
 
 	uploader, err := tusClient.CreateUpload(upload)
 	if err != nil {
-		return fmt.Errorf("starting upload: %w (%s)", err, tusClient.Response)
+		if ce, ok := err.(tus.ClientError); ok && len(ce.Body) > 0 {
+			return fmt.Errorf("starting upload: %w (%s)", err, ce.Body)
+		}
+		return fmt.Errorf("starting upload: %w", err)
 	}
 
 	return uploader.Upload()
