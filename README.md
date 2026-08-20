@@ -48,15 +48,37 @@ first, so it can't silently drift from what's checked in; CI does the same.
 
 ## Installation
 
+### Download a release binary
+
+Prebuilt binaries for Linux, macOS and Windows are attached to every
+[release](https://github.com/Frikanalen/fk-cli/releases). No Go toolchain needed, and
+nothing to unpack -- the assets are the binaries themselves:
+
+```bash
+curl -fsSL -o fk https://github.com/Frikanalen/fk-cli/releases/latest/download/fk_linux_amd64
+sudo install -m 755 fk /usr/local/bin/fk
+```
+
+Swap `fk_linux_amd64` for `fk_linux_arm64`, `fk_darwin_amd64`, `fk_darwin_arm64` or
+`fk_windows_amd64.exe`. The `latest` URL always points at the newest release; substitute
+`download/v1.0.0` for a specific one.
+
+`SHA256SUMS` is published alongside the binaries if you want to verify the download.
+
+Note that macOS will quarantine the unsigned binary on first run; clear it with
+`xattr -d com.apple.quarantine fk`.
+
+### Build from source
+
 You need a Go compiler - and if you want to generate test media you'll need ffmpeg.
 
-### Debian
+#### Debian
 ```
 sudo apt install golang ffmpeg
 sudo make -e PREFIX=/usr install
 ```
 
-### MacOS
+#### MacOS
 
 ```
 brew install golang ffmpeg
@@ -79,3 +101,19 @@ brew install golangci-lint
 ```bash
 curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.13.1
 ```
+
+## Releasing
+
+Releases are cut by pushing a `v`-prefixed tag. The
+[release workflow](.github/workflows/release.yaml) regenerates the client, runs vet and
+the tests, cross-compiles for linux/amd64, linux/arm64, darwin/amd64, darwin/arm64 and
+windows/amd64, and publishes the bare binaries plus a `SHA256SUMS` file to a GitHub
+release with auto-generated notes.
+
+```bash
+git tag -a v1.0.0 -m "v1.0.0" && git push origin v1.0.0
+```
+
+A tag with a suffix (`v1.0.0-rc1`) is published as a prerelease. The tag name is stamped
+into the binary, so `fk --version` reports it. If a release build needs to be re-run, use
+the workflow's `workflow_dispatch` trigger with the existing tag rather than re-pushing it.
