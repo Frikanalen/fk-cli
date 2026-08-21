@@ -33,7 +33,27 @@ jobs:
     steps:
       - name: Resolve tag
         id: tag
-        run: echo "name=${{ inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+        env:
+          TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          name="${TAG:-$REF_NAME}"
+
+          # github.ref_name is only a sensible fallback for the tag push trigger:
+          # a workflow_dispatch run is attached to a branch, so an empty tag input
+          # lands here as "main" and would otherwise build all the way to the
+          # publish step before failing on --verify-tag.
+          case "$name" in
+            v*) ;;
+            *)
+              echo "::error::Refusing to release '$name': expected a v-prefixed tag." \
+                   "Set the tag input to an existing tag (e.g. v1.2.3) when starting" \
+                   "this workflow by hand."
+              exit 1
+              ;;
+          esac
+
+          echo "name=$name" >> "$GITHUB_OUTPUT"
 
       - name: Checkout code
         uses: actions/checkout@v7
