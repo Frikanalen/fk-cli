@@ -5,12 +5,25 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
 jobs:
   build:
     name: Build and test
     runs-on: ubuntu-latest
 
     steps:
+      - name: Release PR or GitHub Release (main only)
+        id: release
+        if: ${{ github.ref == 'refs/heads/main' }}
+        uses: googleapis/release-please-action@v5
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
       - name: Checkout code
         uses: actions/checkout@v7
 
