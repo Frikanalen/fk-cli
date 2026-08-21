@@ -7,12 +7,38 @@ If there is functionality you'd like to see, please file an issue - or even bett
 
 ## Configuration
 
-Configuration lives in `~/.frikanalen.yaml`, created on first run. The `api` key sets the
-server to talk to (defaults to `http://localhost:8000`); it can also be set via the
-`FK_API` environment variable.
+Configuration lives in `~/.frikanalen.yaml`, created on first run.
 
-Run `fk login -e you@example.com` to authenticate; the auth token it obtains is stored in
-that same file.
+The CLI talks to one *environment* at a time. `local` (`http://localhost:8000`, the
+default), `staging` and `prod` are built in, and each keeps its own auth token -- so
+switching back and forth does not mean logging in again:
+
+```bash
+fk env              # print the active environment
+fk env list         # all environments, with the active one marked
+fk env use staging  # switch
+```
+
+Run `fk login -e you@example.com` to authenticate; the token is stored under the active
+environment.
+
+`fk env use <name> --api <url>` defines an environment of your own (or points a built-in
+one somewhere else). Setting `FK_API` overrides the active environment's URL for a single
+run, without touching the configuration file.
+
+The resulting file looks like this:
+
+```yaml
+environment: staging
+environments:
+  local:
+    token: ...
+  staging:
+    token: ...
+```
+
+Configurations from older versions, which had a single top-level `api`/`token` pair, are
+migrated to this layout automatically on first run.
 
 ## Requirements
 

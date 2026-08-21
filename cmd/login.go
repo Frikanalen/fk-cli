@@ -9,7 +9,6 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 	"golang.org/x/term"
 )
 
@@ -46,11 +45,10 @@ var loginCmd = &cobra.Command{
 			log.Fatalln("could not login:", err)
 		}
 
-		viper.Set("token", client.Token())
-		if err := viper.WriteConfig(); err != nil {
+		if err := fk.SaveToken(client.Token()); err != nil {
 			log.Fatalln("could not save token:", err)
 		}
-		log.Infoln("login successful")
+		log.Infoln("login successful for environment", fk.CurrentEnvironment())
 	},
 }
 
