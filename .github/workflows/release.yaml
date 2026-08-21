@@ -1,6 +1,15 @@
 name: fk-cli release
 
 on:
+  # Called by the build workflow once release-please has cut a release, since
+  # its GITHUB_TOKEN-created tag cannot trigger this workflow by itself.
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Tag to build the release from'
+        required: true
+        type: string
+  # A hand-pushed tag still produces binaries on its own.
   push:
     tags:
       - 'v*'
@@ -11,6 +20,7 @@ on:
       tag:
         description: 'Existing tag to build the release from (e.g. v1.2.3)'
         required: true
+        type: string
 
 permissions:
   contents: write

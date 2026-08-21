@@ -104,16 +104,25 @@ curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b $(go env GOPATH)/b
 
 ## Releasing
 
-Releases are cut by pushing a `v`-prefixed tag. The
-[release workflow](.github/workflows/release.yaml) regenerates the client, runs vet and
-the tests, cross-compiles for linux/amd64, linux/arm64, darwin/amd64, darwin/arm64 and
-windows/amd64, and publishes the bare binaries plus a `SHA256SUMS` file to a GitHub
-release with auto-generated notes.
+Versioning is handled by [release-please](https://github.com/googleapis/release-please),
+driven by [Conventional Commit](https://www.conventionalcommits.org/) messages on `main`.
+It keeps a release PR open with the pending version bump and CHANGELOG entry; merging
+that PR is what cuts a release.
 
-```bash
-git tag -a v1.0.0 -m "v1.0.0" && git push origin v1.0.0
-```
+Merging the release PR tags the commit and creates the GitHub release, and the build
+workflow then calls the [release workflow](.github/workflows/release.yaml) to attach the
+binaries: it regenerates the client, runs vet and the tests, cross-compiles for
+linux/amd64, linux/arm64, darwin/amd64, darwin/arm64 and windows/amd64, and uploads the
+bare binaries plus a `SHA256SUMS` file to the release.
 
-A tag with a suffix (`v1.0.0-rc1`) is published as a prerelease. The tag name is stamped
-into the binary, so `fk --version` reports it. If a release build needs to be re-run, use
-the workflow's `workflow_dispatch` trigger with the existing tag rather than re-pushing it.
+The call is explicit because release-please tags using the default `GITHUB_TOKEN`, and
+events raised by that token do not start new workflow runs -- so the tag push cannot
+trigger the release workflow by itself.
+
+The tag name is stamped into the binary, so `fk --version` reports it.
+
+Pushing a `v`-prefixed tag by hand also builds and publishes a release, which is mostly
+useful outside the release-please flow; a tag with a suffix (`v1.0.0-rc1`) goes out as a
+prerelease. If a release build needs to be re-run, use the release workflow's
+`workflow_dispatch` trigger with the existing tag rather than deleting and re-pushing it
+-- the assets are re-uploaded over the existing release.
