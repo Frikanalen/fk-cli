@@ -46,7 +46,10 @@ func newVideoFromFlags(flags *pflag.FlagSet) (*fk.CreateVideoRequest, error) {
 
 var createCmd = &cobra.Command{
 	Use:   "create",
-	Short: "Create video",
+	Short: "Create video, optionally uploading a file for it",
+	Long: "Create a video. With -f, the file is uploaded for the newly created\n" +
+		"video as well; the video ID is printed first, so a failed upload can be\n" +
+		"retried with \"video upload -i <id> -f <file>\".",
 	Run: func(cmd *cobra.Command, args []string) {
 		client, err := fk.Open()
 		if err != nil {
@@ -58,12 +61,32 @@ var createCmd = &cobra.Command{
 			log.Fatal(err)
 		}
 
-		videoId, err := client.CreateVideo(context.Background(), *newVideoBody)
+		fileSpec, err := cmd.Flags().GetString("file")
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		wait, err := cmd.Flags().GetBool("wait")
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		ctx := context.Background()
+
+		videoId, err := client.CreateVideo(ctx, *newVideoBody)
 		if err != nil {
 			log.Fatal(err)
 		}
 
 		fmt.Println(videoId)
+
+		if fileSpec == "" {
+			return
+		}
+
+		if err := uploadAndWait(ctx, client, videoId, fileSpec, wait); err != nil {
+			log.Fatal(err)
+		}
 	},
 }
 
@@ -75,4 +98,6 @@ func init() {
 	createCmd.Flags().StringSliceP("category", "c", []string{}, "Category name (repeatable)")
 	_ = createCmd.MarkFlagRequired("category")
 	createCmd.Flags().IntP("org-id", "o", 0, "Organization ID (only needed if you edit more than one)")
+	createCmd.Flags().StringP("file", "f", "", "Path to file to upload for the new video")
+	createCmd.Flags().Bool("wait", true, "With -f, wait for ingest to finish and report its progress")
 }

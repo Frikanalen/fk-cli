@@ -11,8 +11,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/spf13/viper"
-
 	apiclient "github/frikanalen/fk-cli/fk-client/generated"
 )
 
@@ -23,9 +21,10 @@ type Client struct {
 	token string
 }
 
-// Open builds a Client from the "API" and "token" configuration keys.
+// Open builds a Client for the active environment, using the auth token
+// stored for that environment.
 func Open() (*Client, error) {
-	return newClient(viper.GetString("API"), viper.GetString("token"))
+	return newClient(APIURL(), StoredToken())
 }
 
 // newClient builds a Client against baseURL, independent of viper, so
