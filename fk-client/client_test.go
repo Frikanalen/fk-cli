@@ -325,3 +325,20 @@ func TestClientIngestStatus(t *testing.T) {
 		t.Errorf("job.PercentageDone = %v, want 55", job.PercentageDone)
 	}
 }
+
+func TestVideoURLPointsAtTheDeploymentsWebsite(t *testing.T) {
+	cases := map[string]string{
+		"https://frikanalen.no":  "https://frikanalen.no/video/628648",
+		"https://frikanalen.no/": "https://frikanalen.no/video/628648",
+		"http://localhost:8000":  "http://localhost:8000/video/628648",
+	}
+	for base, want := range cases {
+		c, err := newClient(base, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := c.VideoURL(628648); got != want {
+			t.Errorf("VideoURL with base %q = %q, want %q", base, got, want)
+		}
+	}
+}

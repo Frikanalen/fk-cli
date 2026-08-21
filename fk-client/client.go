@@ -17,8 +17,12 @@ import (
 // Client talks to a Frikanalen API server, authenticating with a stored
 // DRF auth token when one is available.
 type Client struct {
-	api   *apiclient.ClientWithResponses
-	token string
+	api *apiclient.ClientWithResponses
+	// baseURL is the deployment the client talks to. The API lives under
+	// /api on the same host as the website, so it also roots the page URLs
+	// the CLI prints.
+	baseURL string
+	token   string
 }
 
 // Open builds a Client for the active environment, using the auth token
@@ -30,7 +34,7 @@ func Open() (*Client, error) {
 // newClient builds a Client against baseURL, independent of viper, so
 // tests can point it at an httptest.Server instead of real configuration.
 func newClient(baseURL, token string) (*Client, error) {
-	c := &Client{token: token}
+	c := &Client{baseURL: strings.TrimSuffix(baseURL, "/"), token: token}
 
 	api, err := apiclient.NewClientWithResponses(baseURL, apiclient.WithRequestEditorFn(c.authenticate))
 	if err != nil {
@@ -147,6 +151,12 @@ func (c *Client) Profile(ctx context.Context) (*User, error) {
 		FirstName: deref(u.FirstName),
 		LastName:  deref(u.LastName),
 	}, nil
+}
+
+// VideoURL returns the address of a video's page on the website of the
+// deployment this client is talking to.
+func (c *Client) VideoURL(videoId int) string {
+	return fmt.Sprintf("%s/video/%d", c.baseURL, videoId)
 }
 
 // CreateVideo creates a new video record and returns its ID. It does not

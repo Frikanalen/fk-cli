@@ -10,10 +10,20 @@ import (
 	"github.com/eventials/go-tus"
 )
 
-// Upload fetches an upload token for videoId and streams filespec to the
-// ingest server over tus, tagging the upload with the fields its
-// pre-create hook requires: videoID, origFileName and uploadToken.
+// ProgressFunc is called with the number of bytes uploaded so far and the
+// total size of the file, as an upload proceeds.
+type ProgressFunc func(uploaded, total int64)
+
+// Upload streams filespec to the ingest server without reporting progress.
 func (c *Client) Upload(ctx context.Context, videoId int, filespec string) error {
+	return c.UploadWithProgress(ctx, videoId, filespec, nil)
+}
+
+// UploadWithProgress fetches an upload token for videoId and streams filespec
+// to the ingest server over tus, tagging the upload with the fields its
+// pre-create hook requires: videoID, origFileName and uploadToken. If
+// progress is non-nil it is called as each chunk lands.
+func (c *Client) UploadWithProgress(ctx context.Context, videoId int, filespec string, progress ProgressFunc) error {
 	token, err := c.UploadToken(ctx, videoId)
 	if err != nil {
 		return fmt.Errorf("fetching upload token: %w", err)
@@ -52,7 +62,38 @@ func (c *Client) Upload(ctx context.Context, videoId int, filespec string) error
 		return fmt.Errorf("starting upload: %w", err)
 	}
 
-	return uploader.Upload()
+	if progress != nil {
+		progress(0, fi.Size())
+
+		// go-tus broadcasts progress with a blocking send, so this channel
+		// has to be drained for as long as the uploader is alive; stopped
+		// tells the consumer to keep draining but stop reporting once the
+		// upload is over.
+		updates := make(chan tus.Upload)
+		uploader.NotifyUploadProgress(updates)
+
+		stopped := make(chan struct{})
+		defer close(stopped)
+
+		go func() {
+			for u := range updates {
+				select {
+				case <-stopped:
+				default:
+					progress(u.Offset(), u.Size())
+				}
+			}
+		}()
+	}
+
+	if err := uploader.Upload(); err != nil {
+		return err
+	}
+
+	if progress != nil {
+		progress(fi.Size(), fi.Size())
+	}
+	return nil
 }
 
 // WaitForIngest polls a video's ingest status until it reaches a terminal
