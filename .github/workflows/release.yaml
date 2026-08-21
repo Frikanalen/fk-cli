@@ -1,0 +1,107 @@
+name: fk-cli release
+
+on:
+  # Called by the build workflow once release-please has cut a release, since
+  # its GITHUB_TOKEN-created tag cannot trigger this workflow by itself.
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Tag to build the release from'
+        required: true
+        type: string
+  # A hand-pushed tag still produces binaries on its own.
+  push:
+    tags:
+      - 'v*'
+  # Lets a failed or superseded release be rebuilt from an existing tag without
+  # having to delete and re-push it.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build the release from (e.g. v1.2.3)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish release binaries
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Resolve tag
+        id: tag
+        run: echo "name=${{ inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.tag.outputs.name }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Generate API client
+        run: ./generate-client.sh
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build release binaries
+        env:
+          VERSION: ${{ steps.tag.outputs.name }}
+        run: |
+          mkdir -p dist
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+            goos="${target%/*}"
+            goarch="${target#*/}"
+
+            # Published as bare binaries rather than archives: one download and
+            # it is runnable. No version in the name, so the /releases/latest/
+            # permalink stays stable -- the tag is already in the download URL.
+            asset="fk_${goos}_${goarch}"
+            if [ "$goos" = windows ]; then
+              asset="${asset}.exe"
+            fi
+
+            # CGO is off so every target cross-compiles from this one runner;
+            # -trimpath keeps the runner's paths out of the shipped binary.
+            CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build \
+              -trimpath \
+              -ldflags "-s -w -X github/frikanalen/fk-cli/cmd.version=${VERSION}" \
+              -o "dist/${asset}" .
+          done
+
+          # Glob the binaries explicitly -- a bare * would race the redirect
+          # and could list SHA256SUMS inside itself.
+          (cd dist && sha256sum fk_* > SHA256SUMS)
+          ls -l dist
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.tag.outputs.name }}
+        run: |
+          # Anything with a suffix after the version (v1.2.3-rc1) ships as a
+          # prerelease rather than as the latest download.
+          prerelease=""
+          case "$VERSION" in
+            *-*) prerelease="--prerelease" ;;
+          esac
+
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release upload "$VERSION" dist/* --clobber
+          else
+            gh release create "$VERSION" dist/* \
+              --title "$VERSION" \
+              --generate-notes \
+              --verify-tag \
+              $prerelease
+          fi

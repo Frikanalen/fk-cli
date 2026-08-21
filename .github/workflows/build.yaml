@@ -2,13 +2,20 @@ name: fk-cli build
 
 on:
   push:
+    branches:
+      - main
   pull_request:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  pull-requests: write
-  issues: write
+  contents: read
+
+# A new push to a branch makes the run already in flight for it pointless.
+# Never cancel on main, though: that run may be release-please part-way
+# through cutting a tag and a release.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   build:
@@ -16,14 +23,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Release PR or GitHub Release (main only)
-        id: release
-        if: ${{ github.ref == 'refs/heads/main' }}
-        uses: googleapis/release-please-action@v5
-        with:
-          config-file: release-please-config.json
-          manifest-file: .release-please-manifest.json
-
       - name: Checkout code
         uses: actions/checkout@v7
 
@@ -43,3 +42,42 @@ jobs:
 
       - name: Build
         run: go build -o fk .
+
+  release-please:
+    name: Release PR or GitHub Release
+    needs: build
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+
+    steps:
+      - name: Release PR or GitHub Release
+        id: release
+        uses: googleapis/release-please-action@v5
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  # release-please tags and releases using the default GITHUB_TOKEN, and events
+  # raised by that token deliberately do not start new workflow runs -- so the
+  # tag push cannot trigger the release workflow on its own. Call it directly
+  # instead, with the tag release-please just cut.
+  publish-binaries:
+    name: Publish release binaries
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+
+    permissions:
+      contents: write
+
+    uses: ./.github/workflows/release.yaml
+    with:
+      tag: ${{ needs.release-please.outputs.tag_name }}

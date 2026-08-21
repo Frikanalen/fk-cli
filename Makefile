@@ -1,11 +1,16 @@
 GOPATH := $(shell go env GOPATH)
 
+# Stamped into the binary so `fk --version` reports something useful.
+# Release builds pass the tag name here instead; see .github/workflows/release.yaml.
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -X github/frikanalen/fk-cli/cmd.version=$(VERSION)
+
 ifeq ($(PREFIX),)
     PREFIX := /usr/local
 endif
 
 fk: generate main.go fk-client/*.go cmd/*.go
-	go build -o fk .
+	go build -ldflags "$(LDFLAGS)" -o fk .
 
 clean:
 	rm -f fk
