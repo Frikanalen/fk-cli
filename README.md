@@ -40,6 +40,68 @@ environments:
 Configurations from older versions, which had a single top-level `api`/`token` pair, are
 migrated to this layout automatically on first run.
 
+## Importing from video archives
+
+`contrib/` holds importers that pull videos out of a conference video archive and
+publish them here. They share `contrib/fkimport.py`, and all work the same way: list
+the events the archive holds, list one event's videos, then fetch one at its best
+quality and hand it to `fk video create` -- so the environment and login you already
+have (`fk env`, `fk login`) are what they publish to.
+
+| script | archive | needs |
+| --- | --- | --- |
+| `contrib/voctoweb-import.py` | media.ccc.de, or any [voctoweb](https://github.com/voc/voctoweb) instance (`--api`) | stdlib only |
+| `contrib/debconf-import.py` | the [Debian meetings archive](https://meetings-archive.debian.net/pub/debian-meetings/): DebConfs, MiniDebConfs and Debian meetings, 2004 onwards | PyYAML |
+
+```bash
+# 1. Which events are there?
+contrib/voctoweb-import.py events congress
+contrib/debconf-import.py events minidebconf
+
+# 2. Which videos does one hold?
+contrib/voctoweb-import.py videos 38c3 --search rekordbox
+contrib/debconf-import.py videos debconf25 --search kubernetes
+
+# 3. Download the best recording of a video and upload it
+contrib/voctoweb-import.py import 98C007E2-A3B2-44FD-ADF5-D21224DE0988 -c Kultur
+contrib/debconf-import.py import debconf25#39 -c Kultur
+```
+
+Both take several videos at a time. Title, description, speakers and a link back to
+the source are carried over; the rest is yours to pass: `-c/--category` (Frikanalen
+requires at least one; defaults to `Annet`), `-o/--org-id` and `-s/--series-id`, which
+mean what they do for `fk video create`. Downloads go to a temporary directory that is
+removed after a successful upload -- `--dir` keeps them somewhere of your choosing
+instead, and an interrupted download resumes on the next run. `--dry-run` prints the
+download URL and the exact `fk` command line without doing either.
+
+### voctoweb
+
+Mind the vocabulary where it meets the API: voctoweb calls an event a *conference*,
+and reserves *event* for the individual talk -- which is why a video is addressed by
+what media.ccc.de calls its event GUID, or by slug or `media.ccc.de/v/...` URL. The
+recording picked is the one with voctoweb's `high_quality` flag, at the highest
+resolution, preferring mp4 over webm, in the language the talk was held in;
+`--container` and `--language` override that.
+
+### The Debian meetings archive
+
+There is no API, so this reads the video team's inventory of the archive from
+[archive-meta](https://salsa.debian.org/debconf-video-team/archive-meta) -- one YAML
+file per event, and the only place the real titles, abstracts and speaker lists live.
+It is fetched once and cached for a day under `$XDG_CACHE_HOME/fk-cli`; `--refresh`
+fetches it again.
+
+Videos are addressed by the ref that `videos` prints (`2025/debconf25#39`), by file
+name, by title, or by archive URL -- a title or file name that matches in several
+events is reported with the candidates, and `--event` narrows the search. The
+encoding picked is the highest-resolution one, which is the inventory's `default`
+(the master) in every case today; `--format` picks another by name, e.g. `lq`.
+Recordings the inventory flags as non-free are refused unless you pass
+`--allow-non-free`.
+
+Needs PyYAML: `apt install python3-yaml`, or `pip install pyyaml`.
+
 ## Requirements
 
 ffmpeg is only required for test video generation.
