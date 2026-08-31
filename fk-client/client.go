@@ -152,6 +152,44 @@ func (c *Client) Profile(ctx context.Context) (*User, error) {
 	}, nil
 }
 
+// seriesPageSize is how many series ListSeries asks for per request.
+// /api/series paginates with limit/offset, so a listing is a walk; a
+// generous page keeps the number of round trips down.
+const seriesPageSize = 100
+
+// ListSeries returns the series belonging to an organization, walking the
+// paginated endpoint until it has them all.
+func (c *Client) ListSeries(ctx context.Context, orgId int) ([]Series, error) {
+	var out []Series
+
+	for offset := 0; ; offset += seriesPageSize {
+		limit := seriesPageSize
+		page := offset
+		resp, err := c.api.SeriesListWithResponse(ctx, &apiclient.SeriesListParams{
+			Limit:        &limit,
+			Offset:       &page,
+			Organization: &orgId,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("performing request: %w", err)
+		}
+		if err := checkResponse(resp.StatusCode(), resp.Body); err != nil {
+			return nil, err
+		}
+
+		results := resp.JSON200.Results
+		for _, s := range results {
+			out = append(out, Series{Id: deref(s.Id), Name: s.Name})
+		}
+
+		// Stop on a short or empty page rather than trusting Count alone:
+		// a server that reports a stale count would otherwise spin here.
+		if len(results) < seriesPageSize || len(out) >= resp.JSON200.Count {
+			return out, nil
+		}
+	}
+}
+
 // VideoURL returns the address of a video's page on the website of the
 // deployment this client is talking to.
 func (c *Client) VideoURL(videoId int) string {
@@ -166,6 +204,7 @@ func (c *Client) CreateVideo(ctx context.Context, req CreateVideoRequest) (int, 
 		Description:  &req.Description,
 		Categories:   req.Categories,
 		Organization: req.OrgId,
+		SeriesId:     req.SeriesId,
 	}
 
 	resp, err := c.api.VideosCreateWithResponse(ctx, body)

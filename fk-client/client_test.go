@@ -3,10 +3,12 @@ package fk
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"testing"
 
 	apiclient "github/frikanalen/fk-cli/fk-client/generated"
@@ -214,9 +216,10 @@ func TestClientProfileSendsAuthHeaderAndParsesOrgs(t *testing.T) {
 
 func TestClientCreateVideo(t *testing.T) {
 	cases := []struct {
-		name  string
-		orgId *int
-		want  map[string]any
+		name     string
+		orgId    *int
+		seriesId *int
+		want     map[string]any
 	}{
 		{
 			name:  "without an explicit org, the field is omitted so the server infers it",
@@ -235,6 +238,16 @@ func TestClientCreateVideo(t *testing.T) {
 				"description":  "a test video",
 				"name":         "Test video",
 				"organization": float64(3),
+			},
+		},
+		{
+			name:     "a series files the video as an episode of it",
+			seriesId: intPtr(8),
+			want: map[string]any{
+				"categories":  []any{"news"},
+				"description": "a test video",
+				"name":        "Test video",
+				"seriesId":    float64(8),
 			},
 		},
 	}
@@ -269,6 +282,7 @@ func TestClientCreateVideo(t *testing.T) {
 				Description: "a test video",
 				Categories:  []string{"news"},
 				OrgId:       tc.orgId,
+				SeriesId:    tc.seriesId,
 			}
 
 			id, err := c.CreateVideo(context.Background(), req)
@@ -340,5 +354,104 @@ func TestVideoURLPointsAtTheDeploymentsWebsite(t *testing.T) {
 		if got := c.VideoURL(628648); got != want {
 			t.Errorf("VideoURL with base %q = %q, want %q", base, got, want)
 		}
+	}
+}
+
+func TestClientListSeries(t *testing.T) {
+	var gotAuth, gotOrg string
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotOrg = r.URL.Query().Get("organization")
+		if r.Method != http.MethodGet || r.URL.Path != "/api/series" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"count": 2,
+			"results": []map[string]any{
+				{"id": 1, "name": "Morgensending"},
+				{"id": 4, "name": "Kveldssending"},
+			},
+		})
+	})
+
+	series, err := c.ListSeries(context.Background(), 3)
+	if err != nil {
+		t.Fatalf("ListSeries: %v", err)
+	}
+
+	if gotAuth != "Token test-token" {
+		t.Errorf("Authorization header = %q, want %q", gotAuth, "Token test-token")
+	}
+	// The org is filtered server-side; sending it is the whole point of
+	// the mandatory argument.
+	if gotOrg != "3" {
+		t.Errorf("organization query = %q, want %q", gotOrg, "3")
+	}
+	want := []Series{{Id: 1, Name: "Morgensending"}, {Id: 4, Name: "Kveldssending"}}
+	if !reflect.DeepEqual(series, want) {
+		t.Errorf("ListSeries = %#v, want %#v", series, want)
+	}
+}
+
+func TestClientListSeriesWalksEveryPage(t *testing.T) {
+	// A full first page has to be followed by a request for the next one,
+	// or a deployment with more series than fit in a page silently loses
+	// the tail of the list.
+	total := seriesPageSize + 3
+	var gotOffsets []string
+
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotOffsets = append(gotOffsets, r.URL.Query().Get("offset"))
+		if got := r.URL.Query().Get("limit"); got != strconv.Itoa(seriesPageSize) {
+			t.Errorf("limit = %q, want %d", got, seriesPageSize)
+		}
+		// Every page has to stay scoped to the same organization.
+		if got := r.URL.Query().Get("organization"); got != "3" {
+			t.Errorf("organization = %q, want %q", got, "3")
+		}
+
+		offset, err := strconv.Atoi(r.URL.Query().Get("offset"))
+		if err != nil {
+			t.Fatalf("offset: %v", err)
+		}
+
+		results := []map[string]any{}
+		for i := offset; i < total && i < offset+seriesPageSize; i++ {
+			results = append(results, map[string]any{"id": i, "name": fmt.Sprintf("Series %d", i)})
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"count": total, "results": results})
+	})
+
+	series, err := c.ListSeries(context.Background(), 3)
+	if err != nil {
+		t.Fatalf("ListSeries: %v", err)
+	}
+
+	if len(series) != total {
+		t.Fatalf("got %d series, want %d", len(series), total)
+	}
+	if series[0].Id != 0 || series[total-1].Id != total-1 {
+		t.Errorf("unexpected first/last series: %+v / %+v", series[0], series[total-1])
+	}
+	wantOffsets := []string{"0", strconv.Itoa(seriesPageSize)}
+	if !reflect.DeepEqual(gotOffsets, wantOffsets) {
+		t.Errorf("requested offsets = %v, want %v", gotOffsets, wantOffsets)
+	}
+}
+
+func TestClientListSeriesPropagatesErrors(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"type":"client_error","errors":[{"code":"not_authenticated","detail":"Authentication credentials were not provided.","attr":null}]}`))
+	})
+
+	_, err := c.ListSeries(context.Background(), 3)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	const want = "401: Authentication credentials were not provided."
+	if err.Error() != want {
+		t.Errorf("ListSeries error = %q, want %q", err.Error(), want)
 	}
 }

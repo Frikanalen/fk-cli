@@ -16,6 +16,7 @@ func newVideoCreateFlagSet(t *testing.T) *pflag.FlagSet {
 	flags.StringP("description", "d", "", "Description of video")
 	flags.StringSliceP("category", "c", []string{}, "Category name (repeatable)")
 	flags.IntP("org-id", "o", 0, "Organization ID")
+	flags.IntP("series-id", "s", 0, "Series ID")
 	return flags
 }
 
@@ -72,5 +73,37 @@ func TestNewVideoFromFlagsOrgIdZeroIsStillExplicit(t *testing.T) {
 
 	if req.OrgId == nil || *req.OrgId != 0 {
 		t.Errorf("OrgId = %v, want pointer to 0", req.OrgId)
+	}
+}
+
+func TestNewVideoFromFlagsWithoutSeriesId(t *testing.T) {
+	flags := newVideoCreateFlagSet(t)
+	if err := flags.Parse([]string{"--title", "My video", "--category", "news"}); err != nil {
+		t.Fatal(err)
+	}
+
+	req, err := newVideoFromFlags(flags)
+	if err != nil {
+		t.Fatalf("newVideoFromFlags: %v", err)
+	}
+
+	if req.SeriesId != nil {
+		t.Errorf("SeriesId = %v, want nil when --series-id was not passed", *req.SeriesId)
+	}
+}
+
+func TestNewVideoFromFlagsWithSeriesId(t *testing.T) {
+	flags := newVideoCreateFlagSet(t)
+	if err := flags.Parse([]string{"--title", "My video", "--category", "news", "--series-id", "8"}); err != nil {
+		t.Fatal(err)
+	}
+
+	req, err := newVideoFromFlags(flags)
+	if err != nil {
+		t.Fatalf("newVideoFromFlags: %v", err)
+	}
+
+	if req.SeriesId == nil || *req.SeriesId != 8 {
+		t.Errorf("SeriesId = %v, want pointer to 8", req.SeriesId)
 	}
 }
