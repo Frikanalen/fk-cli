@@ -41,6 +41,14 @@ func newVideoFromFlags(flags *pflag.FlagSet) (*fk.CreateVideoRequest, error) {
 		req.OrgId = &orgId
 	}
 
+	if flags.Changed("series-id") {
+		seriesId, err := flags.GetInt("series-id")
+		if err != nil {
+			return nil, err
+		}
+		req.SeriesId = &seriesId
+	}
+
 	return req, nil
 }
 
@@ -101,6 +109,7 @@ func init() {
 	createCmd.Flags().StringSliceP("category", "c", []string{}, "Category name (repeatable)")
 	_ = createCmd.MarkFlagRequired("category")
 	createCmd.Flags().IntP("org-id", "o", 0, "Organization ID (only needed if you edit more than one)")
+	createCmd.Flags().IntP("series-id", "s", 0, "Series ID to file the video under (see \"fk series list\")")
 	createCmd.Flags().StringP("file", "f", "", "Path to file to upload for the new video")
 	createCmd.Flags().Bool("wait", true, "With -f, wait for ingest to finish and report its progress")
 }

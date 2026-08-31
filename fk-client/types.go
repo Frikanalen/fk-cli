@@ -6,6 +6,13 @@ type SimpleOrg struct {
 	Name string
 }
 
+// Series is a programme series a video can be an episode of, as returned
+// by GET /api/series.
+type Series struct {
+	Id   int
+	Name string
+}
+
 // User is the authenticated user's own profile, as returned by GET /api/user.
 type User struct {
 	Id        int
@@ -26,6 +33,9 @@ type CreateVideoRequest struct {
 	// OrgId only needs to be set when the creator edits more than one
 	// organization; the server infers it otherwise.
 	OrgId *int
+
+	// SeriesId files the video as an episode of that series when set.
+	SeriesId *int
 }
 
 // VideoUploadToken authorizes an upload of a video's file, as returned by
