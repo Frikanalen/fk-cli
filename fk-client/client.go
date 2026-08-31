@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 
 	apiclient "github/frikanalen/fk-cli/fk-client/generated"
@@ -183,7 +182,7 @@ func (c *Client) CreateVideo(ctx context.Context, req CreateVideoRequest) (int, 
 // UploadToken fetches the capability that authorizes uploading a file for
 // the given video.
 func (c *Client) UploadToken(ctx context.Context, videoId int) (*VideoUploadToken, error) {
-	resp, err := c.api.VideosUploadTokenRetrieveWithResponse(ctx, strconv.Itoa(videoId))
+	resp, err := c.api.VideosUploadTokenRetrieveWithResponse(ctx, videoId)
 	if err != nil {
 		return nil, fmt.Errorf("performing request: %w", err)
 	}
@@ -200,7 +199,7 @@ func (c *Client) UploadToken(ctx context.Context, videoId int) (*VideoUploadToke
 // IngestStatus reports how far the ingest pipeline has got with a video's
 // uploaded file.
 func (c *Client) IngestStatus(ctx context.Context, videoId int) (*IngestJob, error) {
-	resp, err := c.api.VideosIngestRetrieveWithResponse(ctx, strconv.Itoa(videoId))
+	resp, err := c.api.VideosIngestRetrieveWithResponse(ctx, videoId)
 	if err != nil {
 		return nil, fmt.Errorf("performing request: %w", err)
 	}
