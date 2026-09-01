@@ -72,6 +72,22 @@ func (e *apiErrors) Error() string {
 	return strings.Join(parts, "; ")
 }
 
+// APIError is a non-2xx answer from the API. It keeps the status code apart
+// from the message so callers can tell a fault worth retrying from a refusal
+// that will be repeated just as firmly next time.
+type APIError struct {
+	Status int
+	// Detail is the server's explanation: the joined contents of its
+	// structured error envelope, or the raw body when it did not send one.
+	Detail string
+	// err is the structured envelope, when there was one, so errors.As can
+	// still reach it.
+	err error
+}
+
+func (e *APIError) Error() string { return fmt.Sprintf("%d: %s", e.Status, e.Detail) }
+func (e *APIError) Unwrap() error { return e.err }
+
 // checkResponse turns a non-2xx status into an error, preferring the API's
 // structured {type, errors} envelope when the body has one.
 func checkResponse(status int, body []byte) error {
@@ -80,9 +96,9 @@ func checkResponse(status int, body []byte) error {
 	}
 	var apiErr apiErrors
 	if err := json.Unmarshal(body, &apiErr); err == nil && len(apiErr.Errors) > 0 {
-		return fmt.Errorf("%d: %w", status, &apiErr)
+		return &APIError{Status: status, Detail: apiErr.Error(), err: &apiErr}
 	}
-	return fmt.Errorf("%d: %s", status, strings.TrimSpace(string(body)))
+	return &APIError{Status: status, Detail: strings.TrimSpace(string(body))}
 }
 
 func deref[T any](p *T) T {
