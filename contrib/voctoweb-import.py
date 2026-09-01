@@ -16,7 +16,10 @@ video is addressed by what media.ccc.de calls its event GUID.
 
 Only the standard library is used; the upload itself is delegated to the fk
 binary, which must be on $PATH (or named with --fk) and logged in to the
-environment you want to publish to ("fk env", "fk login").
+environment you want to publish to ("fk env", "fk login"). A recording that
+carries several video or audio tracks -- a camera mix and a slide capture, a
+talk and its interpretations -- is remuxed down to one of each first, which
+needs ffmpeg; see --no-normalize and --audio-language.
 """
 
 from __future__ import annotations
@@ -193,6 +196,13 @@ def compose_description(event: dict) -> str:
 
 
 def to_item(event: dict, ref: str, recording: dict) -> Item:
+    # A recording tagged "eng-deu-fra" carries the talk plus its
+    # interpretations; the one to keep is the language it was held in.
+    languages = _languages(recording)
+    spoken = event.get("original_language") or ""
+    if spoken not in languages:
+        spoken = languages[0] if languages else ""
+
     return Item(
         ref=ref,
         title=compose_title(event),
@@ -202,6 +212,7 @@ def to_item(event: dict, ref: str, recording: dict) -> Item:
         note=f"{recording.get('folder')} "
              f"{recording.get('width')}x{recording.get('height')} "
              f"{recording.get('language')} ~{recording.get('size')} MB",
+        language=spoken,
     )
 
 

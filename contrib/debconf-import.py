@@ -16,7 +16,9 @@ reads -- it is the only place the real titles and descriptions live.
 The inventory is fetched once and cached, so only the first run of the day
 touches Salsa. Uploading is delegated to the fk binary, which must be on $PATH
 (or named with --fk) and logged in to the environment you want to publish to
-("fk env", "fk login").
+("fk env", "fk login"). A recording that carries several video or audio tracks
+is remuxed down to one of each first, which needs ffmpeg; see --no-normalize
+and --audio-language.
 
 Needs PyYAML: "apt install python3-yaml", or "pip install pyyaml".
 """
@@ -328,6 +330,7 @@ def to_item(video: Video, ref: str, fmt: str | None) -> Item:
         note=f"{video.conference.describe_format(chosen)}"
              + (f" [{video.language}]" if video.language else ""),
         warning=video.non_free,
+        language=video.language,
     )
 
 
