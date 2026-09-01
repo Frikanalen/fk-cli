@@ -2,7 +2,9 @@ package fk
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strconv"
 	"time"
@@ -96,34 +98,120 @@ func (c *Client) UploadWithProgress(ctx context.Context, videoId int, filespec s
 	return nil
 }
 
-// WaitForIngest polls a video's ingest status until it reaches a terminal
-// state (done or failed), calling report on every observed state change.
-// It gives up and returns an error if timeout elapses first.
-func (c *Client) WaitForIngest(ctx context.Context, videoId int, timeout time.Duration, report func(IngestJob)) (*IngestJob, error) {
-	return c.waitForIngest(ctx, videoId, timeout, 2*time.Second, report)
+// DefaultIngestStall is how long a watch follows an ingest job that reports
+// nothing new before giving up on it. It bounds silence, not the job: a
+// transcode that keeps reporting progress is followed for as long as it
+// takes, however many hours that is.
+const DefaultIngestStall = 30 * time.Minute
+
+const (
+	// defaultPollInterval is how often a healthy watch asks for the job's
+	// state.
+	defaultPollInterval = 2 * time.Second
+	// maxPollBackoff caps how far apart the retries of a failing poll are
+	// spaced, so a watch that has backed off still notices promptly when
+	// the server comes back.
+	maxPollBackoff = 30 * time.Second
+)
+
+// IngestWatch configures how WaitForIngest follows a job and what it reports
+// while doing so. The zero value is a usable watch that reports nothing.
+type IngestWatch struct {
+	// StallTimeout bounds how long the job may report nothing new before
+	// the watch gives up. Zero means DefaultIngestStall.
+	StallTimeout time.Duration
+
+	// OnUpdate, when set, is called with every changed observation of the
+	// job: a new state, or a new percentage within the state it is already
+	// in.
+	OnUpdate func(job IngestJob)
+
+	// OnRetry, when set, is called before each retry of a failed poll, with
+	// the failure and how long polling has been failing for. A watch that
+	// recovers reports the job through OnUpdate again even if nothing about
+	// it changed while it was out of touch, so a display that said so can
+	// stop saying so.
+	OnRetry func(err error, failingFor time.Duration)
+}
+
+// WaitForIngest follows a video's ingest job until it reaches a terminal
+// state (done or failed), reporting progress through w. It survives a server
+// that goes away for a while -- polls that fail are retried with a widening
+// backoff -- and returns an error only once the job has been silent, or
+// unreachable, for w's stall timeout. Requests the server refuses outright,
+// like an expired token or an unknown video, end the watch immediately.
+//
+// The job is the server's business, not the caller's: giving up on watching
+// one does not cancel it, and a later WaitForIngest picks the same job up
+// wherever it has got to.
+func (c *Client) WaitForIngest(ctx context.Context, videoId int, w IngestWatch) (*IngestJob, error) {
+	return c.waitForIngest(ctx, videoId, defaultPollInterval, w)
 }
 
 // waitForIngest is WaitForIngest with the poll interval broken out so tests
 // can drive it without waiting on the wall clock.
-func (c *Client) waitForIngest(ctx context.Context, videoId int, timeout, pollInterval time.Duration, report func(IngestJob)) (*IngestJob, error) {
-	deadline := time.Now().Add(timeout)
-	var lastState string
-	var lastPercentage int
+func (c *Client) waitForIngest(ctx context.Context, videoId int, pollInterval time.Duration, w IngestWatch) (*IngestJob, error) {
+	stall := w.StallTimeout
+	if stall <= 0 {
+		stall = DefaultIngestStall
+	}
+
+	var (
+		last      *IngestJob // the most recent job we managed to read
+		lastState string
+		// lastPercentage starts at a value no reading can take, so the
+		// first observation always counts as a change worth reporting.
+		lastPercentage = -2
+		// newsAt is when the job last told us something we did not already
+		// know; the stall timeout is measured from it.
+		newsAt = time.Now()
+		// failingSince is when polling started failing, zero while healthy.
+		failingSince time.Time
+		backoff      = pollInterval
+	)
 
 	for {
 		job, err := c.IngestStatus(ctx, videoId)
 		if err != nil {
-			return nil, err
+			if !retryablePoll(err) {
+				return last, err
+			}
+			if failingSince.IsZero() {
+				failingSince = time.Now()
+			}
+			failingFor := time.Since(failingSince)
+			if failingFor >= stall {
+				return last, fmt.Errorf("timed out waiting for ingest: could not reach the server for %s: %w",
+					failingFor.Round(time.Second), err)
+			}
+			if w.OnRetry != nil {
+				w.OnRetry(err, failingFor)
+			}
+			if err := sleep(ctx, backoff); err != nil {
+				return last, err
+			}
+			backoff = min(2*backoff, maxPollBackoff)
+			continue
 		}
+
+		if !failingSince.IsZero() {
+			// Back in touch. Say where things stand now, whether or not
+			// they moved while we could not see them.
+			failingSince, backoff = time.Time{}, pollInterval
+			lastState, lastPercentage = "", -2
+		}
+		last = job
 
 		percentage := -1
 		if job.PercentageDone != nil {
 			percentage = *job.PercentageDone
 		}
-		if report != nil && (job.State != lastState || percentage != lastPercentage) {
-			report(*job)
-			lastState = job.State
-			lastPercentage = percentage
+		if job.State != lastState || percentage != lastPercentage {
+			newsAt = time.Now()
+			lastState, lastPercentage = job.State, percentage
+			if w.OnUpdate != nil {
+				w.OnUpdate(*job)
+			}
 		}
 
 		switch job.State {
@@ -131,14 +219,41 @@ func (c *Client) waitForIngest(ctx context.Context, videoId int, timeout, pollIn
 			return job, nil
 		}
 
-		if time.Now().After(deadline) {
-			return job, fmt.Errorf("timed out waiting for ingest to finish, last state %q", job.State)
+		if silent := time.Since(newsAt); silent >= stall {
+			return job, fmt.Errorf("timed out waiting for ingest: no progress for %s, last state %q",
+				silent.Round(time.Second), job.State)
 		}
 
-		select {
-		case <-ctx.Done():
-			return job, ctx.Err()
-		case <-time.After(pollInterval):
+		if err := sleep(ctx, pollInterval); err != nil {
+			return job, err
 		}
+	}
+}
+
+// retryablePoll reports whether a failed poll is worth trying again. Network
+// trouble and server-side faults come and go; a request the server refused --
+// a bad token, a video that is not there -- would be refused again, so those
+// end the watch at once.
+func retryablePoll(err error) bool {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.Status {
+		case http.StatusRequestTimeout, http.StatusTooManyRequests:
+			return true
+		}
+		return apiErr.Status >= 500
+	}
+	// Anything else got no answer at all: a refused connection, a dropped
+	// TLS handshake, a name that would not resolve. All worth another go.
+	return true
+}
+
+// sleep waits for d, or returns the context's error if it is cancelled first.
+func sleep(ctx context.Context, d time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(d):
+		return nil
 	}
 }

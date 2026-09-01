@@ -56,9 +56,10 @@ var createCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create video, optionally uploading a file for it",
 	Long: "Create a video. With -f, the file is uploaded for the newly created\n" +
-		"video as well, and the video's URL is printed once it is ready. If the\n" +
-		"upload fails, the command reports the ID to retry it with, using\n" +
-		"\"video upload -i <id> -f <file>\".",
+		"video as well, and the video's URL is printed once it is ready. If\n" +
+		"anything fails, the command reports the ID and the command to carry\n" +
+		"on with: \"video upload\" when the file did not make it across, and\n" +
+		"\"video status --wait\" when it did and only the watching stopped.",
 	Run: func(cmd *cobra.Command, args []string) {
 		client, err := fk.Open()
 		if err != nil {
@@ -92,11 +93,12 @@ var createCmd = &cobra.Command{
 			return
 		}
 
+		// The ID is not printed up front any more, so the failure has to hand
+		// it over -- as part of the command that resumes from wherever it got
+		// to, which is not the same command for a lost upload as for a lost
+		// view of the ingest that follows one.
 		if err := uploadAndWait(ctx, client, videoId, fileSpec, wait); err != nil {
-			// The ID is not printed up front any more, so hand it over here:
-			// it is what a retry of the upload needs.
-			log.Errorf("retry with: fk video upload -i %d -f %s", videoId, fileSpec)
-			log.Fatal(err)
+			fatalWithHint(err)
 		}
 	},
 }

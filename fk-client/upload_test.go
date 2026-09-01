@@ -3,6 +3,7 @@ package fk
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -45,8 +46,11 @@ func TestWaitForIngestReportsChangesAndStopsAtDone(t *testing.T) {
 	})
 
 	var reports []IngestJob
-	job, err := c.waitForIngest(context.Background(), 1, time.Second, time.Millisecond, func(j IngestJob) {
-		reports = append(reports, j)
+	job, err := c.waitForIngest(context.Background(), 1, time.Millisecond, IngestWatch{
+		StallTimeout: time.Second,
+		OnUpdate: func(j IngestJob) {
+			reports = append(reports, j)
+		},
 	})
 	if err != nil {
 		t.Fatalf("waitForIngest: %v", err)
@@ -78,7 +82,7 @@ func TestWaitForIngestFailedIsTerminal(t *testing.T) {
 		})
 	})
 
-	job, err := c.waitForIngest(context.Background(), 1, time.Second, time.Millisecond, nil)
+	job, err := c.waitForIngest(context.Background(), 1, time.Millisecond, IngestWatch{StallTimeout: time.Second})
 	if err != nil {
 		t.Fatalf("waitForIngest: %v", err)
 	}
@@ -87,17 +91,146 @@ func TestWaitForIngestFailedIsTerminal(t *testing.T) {
 	}
 }
 
-func TestWaitForIngestTimesOut(t *testing.T) {
+func TestWaitForIngestGivesUpOnAStalledJob(t *testing.T) {
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"video": 1, "state": IngestStateTranscoding})
 	})
 
-	_, err := c.waitForIngest(context.Background(), 1, 5*time.Millisecond, time.Millisecond, nil)
+	_, err := c.waitForIngest(context.Background(), 1, time.Millisecond, IngestWatch{StallTimeout: 5 * time.Millisecond})
 	if err == nil {
 		t.Fatal("expected a timeout error, got nil")
 	}
-	if !strings.Contains(err.Error(), "timed out") {
-		t.Errorf("error = %q, want it to mention a timeout", err.Error())
+	if !strings.Contains(err.Error(), "timed out") || !strings.Contains(err.Error(), IngestStateTranscoding) {
+		t.Errorf("error = %q, want it to mention a timeout and the last state", err.Error())
+	}
+}
+
+// A job that keeps reporting progress is followed however long it takes: the
+// stall timeout bounds silence, not the length of the transcode.
+func TestWaitForIngestFollowsASlowButMovingJob(t *testing.T) {
+	const stall = 40 * time.Millisecond
+
+	var call int32
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		// Percentage climbs by one per poll, so the job takes far longer
+		// overall than it is ever allowed to stand still for.
+		i := int(atomic.AddInt32(&call, 1))
+		body := map[string]any{"video": 1, "state": IngestStateTranscoding, "percentageDone": i}
+		if i > 40 {
+			body = map[string]any{"video": 1, "state": IngestStateDone, "percentageDone": 100}
+		}
+		writeJSON(w, http.StatusOK, body)
+	})
+
+	job, err := c.waitForIngest(context.Background(), 1, time.Millisecond, IngestWatch{StallTimeout: stall})
+	if err != nil {
+		t.Fatalf("waitForIngest: %v", err)
+	}
+	if job.State != IngestStateDone {
+		t.Errorf("final state = %q, want %q", job.State, IngestStateDone)
+	}
+}
+
+// A server that drops out for a while costs the watch nothing but a pause: it
+// retries, and says where things stand once it is back.
+func TestWaitForIngestRetriesTransientFailures(t *testing.T) {
+	var call int32
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch i := atomic.AddInt32(&call, 1); {
+		case i == 1:
+			writeJSON(w, http.StatusOK, map[string]any{"video": 1, "state": IngestStateTranscoding, "percentageDone": 20})
+		case i <= 4:
+			http.Error(w, "bad gateway", http.StatusBadGateway)
+		default:
+			writeJSON(w, http.StatusOK, map[string]any{"video": 1, "state": IngestStateDone, "percentageDone": 100})
+		}
+	})
+
+	var retries int
+	var updates []string
+	job, err := c.waitForIngest(context.Background(), 1, time.Millisecond, IngestWatch{
+		StallTimeout: time.Second,
+		OnUpdate:     func(j IngestJob) { updates = append(updates, j.State) },
+		OnRetry:      func(error, time.Duration) { retries++ },
+	})
+	if err != nil {
+		t.Fatalf("waitForIngest: %v", err)
+	}
+	if job.State != IngestStateDone {
+		t.Errorf("final state = %q, want %q", job.State, IngestStateDone)
+	}
+	if retries != 3 {
+		t.Errorf("OnRetry called %d times, want 3", retries)
+	}
+	want := []string{IngestStateTranscoding, IngestStateDone}
+	if len(updates) != len(want) || updates[0] != want[0] || updates[1] != want[1] {
+		t.Errorf("updates = %v, want %v", updates, want)
+	}
+}
+
+// Coming back in touch re-reports the job even when it did not move while we
+// could not see it, so a display that said "reconnecting" can stop saying so.
+func TestWaitForIngestReportsAgainAfterRecovering(t *testing.T) {
+	var call int32
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		i := atomic.AddInt32(&call, 1)
+		if i == 2 {
+			http.Error(w, "bad gateway", http.StatusBadGateway)
+			return
+		}
+		state := IngestStateTranscoding
+		if i > 3 {
+			state = IngestStateDone
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"video": 1, "state": state, "percentageDone": 20})
+	})
+
+	var updates []IngestJob
+	if _, err := c.waitForIngest(context.Background(), 1, time.Millisecond, IngestWatch{
+		StallTimeout: time.Second,
+		OnUpdate:     func(j IngestJob) { updates = append(updates, j) },
+	}); err != nil {
+		t.Fatalf("waitForIngest: %v", err)
+	}
+
+	// transcoding 20%, transcoding 20% again after the gap, then done.
+	if len(updates) != 3 {
+		t.Fatalf("got %d updates, want 3: %+v", len(updates), updates)
+	}
+	if updates[0].State != IngestStateTranscoding || updates[1].State != IngestStateTranscoding {
+		t.Errorf("updates = %+v, want the unchanged state repeated after recovery", updates)
+	}
+}
+
+// A refusal will be repeated however often it is asked, so it ends the watch
+// rather than being retried until the stall timeout runs out.
+func TestWaitForIngestDoesNotRetryRefusals(t *testing.T) {
+	var call int32
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&call, 1)
+		writeJSON(w, http.StatusNotFound, map[string]any{
+			"type":   "client_error",
+			"errors": []map[string]any{{"code": "not_found", "detail": "No video matches the given query."}},
+		})
+	})
+
+	var retries int
+	_, err := c.waitForIngest(context.Background(), 1, time.Millisecond, IngestWatch{
+		StallTimeout: time.Minute,
+		OnRetry:      func(error, time.Duration) { retries++ },
+	})
+	if err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+	if retries != 0 {
+		t.Errorf("OnRetry called %d times, want 0", retries)
+	}
+	if got := atomic.LoadInt32(&call); got != 1 {
+		t.Errorf("polled %d times, want 1", got)
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusNotFound {
+		t.Errorf("err = %v, want an APIError with status 404", err)
 	}
 }
 
@@ -109,7 +242,7 @@ func TestWaitForIngestRespectsContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 
-	_, err := c.waitForIngest(ctx, 1, time.Minute, 50*time.Millisecond, nil)
+	_, err := c.waitForIngest(ctx, 1, 50*time.Millisecond, IngestWatch{StallTimeout: time.Minute})
 	if err != context.DeadlineExceeded {
 		t.Errorf("err = %v, want context.DeadlineExceeded", err)
 	}
