@@ -75,6 +75,24 @@ removed after a successful upload -- `--dir` keeps them somewhere of your choosi
 instead, and an interrupted download resumes on the next run. `--dry-run` prints the
 download URL and the exact `fk` command line without doing either.
 
+### Normalising before upload
+
+Conference recordings often carry more than one of each stream: a camera mix *and* a
+slide capture, the original language *and* its live interpretations. A 39C3 talk
+typically arrives as two 1080p video tracks and three audio tracks. Left alone, which
+of them reaches air is decided by whatever the ingest transcoder's stream selection
+happens to prefer -- not a thing to leave to chance.
+
+So the file is cut down to one video and one audio track before it is uploaded. Nothing
+is re-encoded (`ffmpeg -c copy`, a remux), a file that already holds one of each is
+left untouched, and the result keeps the original's name, so re-running finds nothing
+to do. It picks the video track the container marks default, and the audio track in the
+language the talk was held in, which the archive tells us; `--audio-language eng` picks
+another, and falls back with a warning if the recording has no such track.
+
+This needs ffmpeg on `$PATH` -- but only for files that actually carry extra tracks.
+`--no-normalize` uploads the file exactly as it was published.
+
 ### voctoweb
 
 Mind the vocabulary where it meets the API: voctoweb calls an event a *conference*,

@@ -12,6 +12,7 @@ the rest.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shlex
 import shutil
@@ -41,7 +42,8 @@ class Item:
     """One video, resolved down to what publishing it actually needs."""
 
     def __init__(self, ref: str, title: str, description: str, url: str,
-                 filename: str, note: str = "", warning: str = "") -> None:
+                 filename: str, note: str = "", warning: str = "",
+                 language: str = "") -> None:
         self.ref = ref
         self.title = truncate_title(title)
         self.description = description
@@ -51,6 +53,9 @@ class Item:
         # something the user should see before it goes out on air.
         self.note = note
         self.warning = warning
+        # The language the talk was held in, where the archive knows it: which
+        # audio track to keep when the file carries several.
+        self.language = language
 
 
 def truncate_title(title: str) -> str:
@@ -176,6 +181,125 @@ class _Progress:
 
 
 # --------------------------------------------------------------------------
+# Normalising what was downloaded
+# --------------------------------------------------------------------------
+
+# Conference recordings often carry more than one of each: a camera mix and a
+# slide capture, an original language and its interpretations. What survives
+# ingest is then whatever the transcoder's stream selection happened to prefer,
+# which is not a thing to leave to chance on something being broadcast. So the
+# file is cut down to one video and one audio track before it is uploaded.
+
+
+def probe_streams(path: str) -> list[dict]:
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
+        raise Fatal("ffprobe not found on $PATH; install ffmpeg, or pass "
+                    "--no-normalize to upload the file untouched")
+    result = subprocess.run(
+        [ffprobe, "-v", "error", "-show_streams", "-print_format", "json", path],
+        capture_output=True, text=True)
+    if result.returncode != 0:
+        raise Fatal(f"ffprobe failed on {os.path.basename(path)}: "
+                    f"{result.stderr.strip().splitlines()[-1] if result.stderr.strip() else result.returncode}")
+    return json.loads(result.stdout).get("streams", [])
+
+
+def _stream_language(stream: dict) -> str:
+    return str((stream.get("tags") or {}).get("language") or "").casefold()
+
+
+def _stream_title(stream: dict) -> str:
+    return str((stream.get("tags") or {}).get("title") or "")
+
+
+def _pick_stream(streams: list[dict], language: str = "") -> dict | None:
+    """Choose one stream: the asked-for language, else the one the container
+    itself marks default, else the first."""
+    if not streams:
+        return None
+    if language:
+        wanted = language.casefold()
+        tagged = [s for s in streams
+                  if _stream_language(s) and (
+                      _stream_language(s) == wanted
+                      or _stream_language(s).startswith(wanted[:2])
+                      or wanted.startswith(_stream_language(s)[:2]))]
+        if tagged:
+            streams = tagged
+    default = [s for s in streams
+               if (s.get("disposition") or {}).get("default")]
+    return (default or streams)[0]
+
+
+def _describe(stream: dict) -> str:
+    bits = [f"#{stream.get('index')}", str(stream.get("codec_name") or "?")]
+    if stream.get("width"):
+        bits.append(f"{stream['width']}x{stream['height']}")
+    if language := _stream_language(stream):
+        bits.append(language)
+    if title := _stream_title(stream):
+        bits.append(f"\"{title}\"")
+    return " ".join(bits)
+
+
+def normalize(path: str, language: str = "") -> None:
+    """Reduce path to a single video and audio track, in place.
+
+    Nothing is re-encoded, and a file that already holds one of each is left
+    alone -- so this is a no-op for most archives, and cheap when it is not.
+    """
+    streams = probe_streams(path)
+    # Cover art rides along as a video stream; it is not one of the candidates.
+    video = [s for s in streams if s.get("codec_type") == "video"
+             and not (s.get("disposition") or {}).get("attached_pic")]
+    audio = [s for s in streams if s.get("codec_type") == "audio"]
+    other = [s for s in streams if s.get("codec_type") not in ("video", "audio")]
+    if len(video) <= 1 and len(audio) <= 1 and not other:
+        return
+
+    keep_video = _pick_stream(video)
+    keep_audio = _pick_stream(audio, language)
+    if keep_video is None:
+        raise Fatal(f"{os.path.basename(path)} has no video track")
+    if audio and keep_audio is not None and language and \
+            not _stream_language(keep_audio).startswith(language.casefold()[:2]):
+        print(f"  no {language!r} audio track; keeping "
+              f"{_describe(keep_audio)}", file=sys.stderr)
+
+    kept = [keep_video] + ([keep_audio] if keep_audio else [])
+    print("  normalizing: keeping " + ", ".join(_describe(s) for s in kept)
+          + f", dropping {len(streams) - len(kept)}", file=sys.stderr)
+
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise Fatal("ffmpeg not found on $PATH; install it, or pass "
+                    "--no-normalize to upload the file untouched")
+
+    root, extension = os.path.splitext(path)
+    output = f"{root}.normalized{extension}"
+    argv = [ffmpeg, "-nostdin", "-v", "error", "-y", "-i", path]
+    for stream in kept:
+        argv += ["-map", f"0:{stream['index']}"]
+    argv += ["-c", "copy"]
+    if extension.lower() in (".mp4", ".m4v", ".mov"):
+        argv += ["-movflags", "+faststart"]
+    argv.append(output)
+
+    result = subprocess.run(argv, capture_output=True, text=True)
+    if result.returncode != 0:
+        if os.path.exists(output):
+            os.remove(output)
+        detail = result.stderr.strip().splitlines()
+        raise Fatal(f"ffmpeg could not normalize {os.path.basename(path)}: "
+                    f"{detail[-1] if detail else result.returncode}")
+
+    # Take the original's name, so the upload and any kept file are still
+    # recognisable, and so a re-run finds nothing left to do.
+    os.replace(output, path)
+
+
+# --------------------------------------------------------------------------
 # Handing files to fk
 # --------------------------------------------------------------------------
 
@@ -222,6 +346,13 @@ def add_import_arguments(parser: argparse.ArgumentParser) -> None:
                         help="keep the downloaded file after a successful upload")
     parser.add_argument("--no-wait", action="store_true",
                         help="do not wait for Frikanalen's ingest to finish")
+    parser.add_argument("--no-normalize", action="store_true",
+                        help="upload the file as it was published, rather than "
+                             "first reducing it to one video and one audio track")
+    parser.add_argument("--audio-language", metavar="LANG",
+                        help="keep this audio track when the recording carries "
+                             "several, e.g. eng (default: the language the talk "
+                             "was held in)")
     parser.add_argument("--dry-run", action="store_true",
                         help="show what would be downloaded and run, without doing it")
     parser.add_argument("--fk", default=os.environ.get("FK_BIN", "fk"),
@@ -258,6 +389,8 @@ def import_items(refs: list[str], resolve, args: argparse.Namespace) -> None:
                 print(f"would download: {item.url} -> {path}")
             else:
                 download(item.url, path)
+                if not args.no_normalize:
+                    normalize(path, args.audio_language or item.language)
 
             fk_create(fk_bin or args.fk, path, item, args)
 
