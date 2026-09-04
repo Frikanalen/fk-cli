@@ -49,11 +49,41 @@ type VideoUploadToken struct {
 // file, as returned by GET /api/videos/{id}/ingest.
 type IngestJob struct {
 	State          string
+	Kind           string
 	PercentageDone *int
 	ErrorCode      string
 }
 
+// DesiredFormats is the converged state advertised by the ingest deployment.
+// Formats maps every desired videofile variant to the revision the running
+// worker image produces.
+type DesiredFormats struct {
+	Image   string         `json:"image"`
+	Formats map[string]int `json:"formats"`
+}
+
+// CatalogueVideo is the part of a video row archive maintenance needs.
+type CatalogueVideo struct {
+	Id        int
+	Duration  string
+	Framerate int
+	Files     []CatalogueFile
+}
+
+// CatalogueFile is the part of a videofile row archive maintenance needs.
+type CatalogueFile struct {
+	Id              int
+	Variant         string
+	ProfileRevision int
+	IntegratedLufs  *float64
+}
+
+// Catalogue is a complete snapshot of videos and their registered files.
+type Catalogue map[int]*CatalogueVideo
+
 const (
+	IngestKindUpload       = "upload"
+	IngestKindBackfill     = "backfill"
 	IngestStatePending     = "pending"
 	IngestStateProbing     = "probing"
 	IngestStateArchiving   = "archiving"

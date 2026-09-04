@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -16,7 +17,8 @@ import (
 // Client talks to a Frikanalen API server, authenticating with a stored
 // DRF auth token when one is available.
 type Client struct {
-	api *apiclient.ClientWithResponses
+	api        *apiclient.ClientWithResponses
+	httpClient *http.Client
 	// baseURL is the deployment the client talks to. The API lives under
 	// /api on the same host as the website, so it also roots the page URLs
 	// the CLI prints.
@@ -33,9 +35,18 @@ func Open() (*Client, error) {
 // newClient builds a Client against baseURL, independent of viper, so
 // tests can point it at an httptest.Server instead of real configuration.
 func newClient(baseURL, token string) (*Client, error) {
-	c := &Client{baseURL: strings.TrimSuffix(baseURL, "/"), token: token}
+	httpClient := &http.Client{}
+	c := &Client{
+		baseURL:    strings.TrimSuffix(baseURL, "/"),
+		token:      token,
+		httpClient: httpClient,
+	}
 
-	api, err := apiclient.NewClientWithResponses(baseURL, apiclient.WithRequestEditorFn(c.authenticate))
+	api, err := apiclient.NewClientWithResponses(
+		baseURL,
+		apiclient.WithHTTPClient(httpClient),
+		apiclient.WithRequestEditorFn(c.authenticate),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("building API client: %w", err)
 	}
@@ -264,7 +275,191 @@ func (c *Client) IngestStatus(ctx context.Context, videoId int) (*IngestJob, err
 
 	return &IngestJob{
 		State:          string(resp.JSON200.State),
+		Kind:           string(deref(resp.JSON200.Kind)),
 		PercentageDone: resp.JSON200.PercentageDone,
 		ErrorCode:      deref(resp.JSON200.ErrorCode),
 	}, nil
+}
+
+// IngestFormats reads the desired variants from the ingest deployment that is
+// currently answering for this environment. The endpoint is deliberately
+// unauthenticated: the API token remains scoped to django-api.
+func (c *Client) IngestFormats(ctx context.Context) (*DesiredFormats, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/ingest-api/formats", nil)
+	if err != nil {
+		return nil, fmt.Errorf("building ingest formats request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("reading ingest formats: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading ingest formats response: %w", err)
+	}
+	if err := checkResponse(resp.StatusCode, body); err != nil {
+		return nil, err
+	}
+
+	var desired DesiredFormats
+	if err := json.Unmarshal(body, &desired); err != nil {
+		return nil, fmt.Errorf("decoding ingest formats: %w", err)
+	}
+	if len(desired.Formats) == 0 {
+		return nil, fmt.Errorf("ingest formats response contains no desired formats")
+	}
+	for variant, revision := range desired.Formats {
+		if variant == "" || revision < 1 {
+			return nil, fmt.Errorf("ingest formats response contains invalid format %q at revision %d", variant, revision)
+		}
+	}
+	return &desired, nil
+}
+
+// cataloguePageSize keeps a full catalogue to a handful of requests without
+// asking django-api to return the entire database in one response.
+const cataloguePageSize = 500
+
+// ReadCatalogue returns every video, including unfinished ingests, with every
+// videofile registered against it. A short paginated read is an error: acting
+// on a partial catalogue would look exactly like a successful complete sweep.
+func (c *Client) ReadCatalogue(ctx context.Context) (Catalogue, error) {
+	videos := Catalogue{}
+	for _, pass := range []struct {
+		properImport bool
+		name         string
+	}{
+		{properImport: false, name: "unfinished videos"},
+		{properImport: true, name: "finished videos"},
+	} {
+		if err := c.readVideoPages(ctx, videos, pass.properImport, pass.name); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := c.readVideofilePages(ctx, videos); err != nil {
+		return nil, err
+	}
+	return videos, nil
+}
+
+func (c *Client) readVideoPages(ctx context.Context, videos Catalogue, properImport bool, name string) error {
+	offset := 0
+	expected := -1
+	seen := 0
+
+	for {
+		limit := cataloguePageSize
+		ordering := "id"
+		resp, err := c.api.VideosListWithResponse(ctx, &apiclient.VideosListParams{
+			Limit:        &limit,
+			Offset:       &offset,
+			Ordering:     &ordering,
+			ProperImport: &properImport,
+		})
+		if err != nil {
+			return fmt.Errorf("reading %s: %w", name, err)
+		}
+		if err := checkResponse(resp.StatusCode(), resp.Body); err != nil {
+			return fmt.Errorf("reading %s: %w", name, err)
+		}
+		if resp.JSON200 == nil {
+			return fmt.Errorf("reading %s: API returned no catalogue page", name)
+		}
+		page := resp.JSON200
+		if expected < 0 {
+			expected = page.Count
+		}
+
+		for _, row := range page.Results {
+			id := deref(row.Id)
+			videos[id] = &CatalogueVideo{
+				Id:        id,
+				Duration:  deref(row.Duration),
+				Framerate: deref(row.Framerate),
+			}
+			seen++
+		}
+
+		if len(page.Results) == 0 || seen >= expected {
+			break
+		}
+		offset += len(page.Results)
+	}
+
+	if seen != expected {
+		return fmt.Errorf("incomplete catalogue: %s reported %d rows but returned %d", name, expected, seen)
+	}
+	return nil
+}
+
+func (c *Client) readVideofilePages(ctx context.Context, videos Catalogue) error {
+	offset := 0
+	expected := -1
+	seen := 0
+
+	for {
+		limit := cataloguePageSize
+		ordering := "id"
+		resp, err := c.api.VideofilesListWithResponse(ctx, &apiclient.VideofilesListParams{
+			Limit:    &limit,
+			Offset:   &offset,
+			Ordering: &ordering,
+		})
+		if err != nil {
+			return fmt.Errorf("reading videofiles: %w", err)
+		}
+		if err := checkResponse(resp.StatusCode(), resp.Body); err != nil {
+			return fmt.Errorf("reading videofiles: %w", err)
+		}
+		if resp.JSON200 == nil {
+			return fmt.Errorf("reading videofiles: API returned no catalogue page")
+		}
+		page := resp.JSON200
+		if expected < 0 {
+			expected = page.Count
+		}
+
+		for _, row := range page.Results {
+			if video := videos[row.Video]; video != nil {
+				video.Files = append(video.Files, CatalogueFile{
+					Id:              deref(row.Id),
+					Variant:         string(row.Variant),
+					ProfileRevision: deref(row.ProfileRevision),
+					IntegratedLufs:  row.IntegratedLufs,
+				})
+			}
+			seen++
+		}
+
+		if len(page.Results) == 0 || seen >= expected {
+			break
+		}
+		offset += len(page.Results)
+	}
+
+	if seen != expected {
+		return fmt.Errorf("incomplete catalogue: videofiles reported %d rows but returned %d", expected, seen)
+	}
+	return nil
+}
+
+// QueueBackfill replaces a video's ingest job with a pending, low-priority
+// archive job. Callers must check IngestStatus first and leave active work and
+// queued uploads alone.
+func (c *Client) QueueBackfill(ctx context.Context, videoId, priority int) error {
+	state := apiclient.IngestStateEnumPending
+	kind := apiclient.Backfill
+	resp, err := c.api.VideosIngestReportWithResponse(ctx, videoId, apiclient.IngestJobRequest{
+		State:    state,
+		Kind:     &kind,
+		Priority: &priority,
+	})
+	if err != nil {
+		return fmt.Errorf("performing request: %w", err)
+	}
+	return checkResponse(resp.StatusCode(), resp.Body)
 }

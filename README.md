@@ -40,6 +40,28 @@ environments:
 Configurations from older versions, which had a single top-level `api`/`token` pair, are
 migrated to this layout automatically on first run.
 
+## Archive maintenance
+
+`fk archive` finds videos whose catalogue rows say ingest has work to do:
+
+```bash
+fk archive backfill                 # missing or stale derived formats
+fk archive refresh-metadata         # missing duration, frame rate, or loudness
+fk archive backfill --limit 50      # inspect the first fifty videos
+fk archive backfill 12345           # inspect one video
+fk archive backfill --apply         # put the reported work in the queue
+```
+
+Both commands are dry runs unless `--apply` is given. They use the active
+environment and its stored API token, and print the ingest image whose live
+format revisions they planned against. Wait for the upload pod and worker pool
+to finish rolling out before applying a catalogue-wide sweep.
+
+Despite the name, `fk archive` never accesses the media archive. It plans from
+django-api's video and videofile rows, then a worker reads the archive and makes
+the final decision for every queued video. This is separate from the
+`fk-archive` utilities installed on the storage host.
+
 ## Importing from video archives
 
 `contrib/` holds importers that pull videos out of a conference video archive and
@@ -119,7 +141,6 @@ Recordings the inventory flags as non-free are refused unless you pass
 `--allow-non-free`.
 
 Needs PyYAML: `apt install python3-yaml`, or `pip install pyyaml`.
-
 ## Requirements
 
 ffmpeg is only required for test video generation.
