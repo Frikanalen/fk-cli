@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 
 	apiclient "github/frikanalen/fk-cli/fk-client/generated"
@@ -324,6 +325,7 @@ func TestClientIngestStatus(t *testing.T) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"video":          42,
 			"state":          "transcoding",
+			"kind":           "backfill",
 			"percentageDone": 55,
 		})
 	})
@@ -335,8 +337,126 @@ func TestClientIngestStatus(t *testing.T) {
 	if job.State != IngestStateTranscoding {
 		t.Errorf("job.State = %q, want %q", job.State, IngestStateTranscoding)
 	}
+	if job.Kind != "backfill" {
+		t.Errorf("job.Kind = %q, want backfill", job.Kind)
+	}
 	if job.PercentageDone == nil || *job.PercentageDone != 55 {
 		t.Errorf("job.PercentageDone = %v, want 55", job.PercentageDone)
+	}
+}
+
+func TestClientIngestFormatsIsUnauthenticated(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/ingest-api/formats" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Errorf("Authorization header = %q, want none", got)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"image":   "ghcr.io/frikanalen/ingest:v1.2.3",
+			"formats": map[string]int{"dash": 2, "large_thumb": 1},
+		})
+	})
+
+	desired, err := c.IngestFormats(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if desired.Image != "ghcr.io/frikanalen/ingest:v1.2.3" || desired.Formats["dash"] != 2 {
+		t.Errorf("unexpected desired formats: %#v", desired)
+	}
+}
+
+func TestClientIngestFormatsRejectsAnEmptyDesiredSet(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{"image": "ingest:test", "formats": map[string]int{}})
+	})
+
+	_, err := c.IngestFormats(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "no desired formats") {
+		t.Fatalf("error = %v, want empty-format error", err)
+	}
+}
+
+func TestClientReadCatalogueIncludesBothImportStatesAndFiles(t *testing.T) {
+	var videoFilters []string
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/videos":
+			properImport := r.URL.Query().Get("proper_import")
+			videoFilters = append(videoFilters, properImport)
+			id := 1
+			if properImport == "true" {
+				id = 2
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"count": 1,
+				"results": []map[string]any{{
+					"id": id, "name": fmt.Sprintf("Video %d", id), "categories": []string{},
+					"duration": "00:01:00", "framerate": 25000,
+				}},
+			})
+		case "/api/videofiles":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"count": 2,
+				"results": []map[string]any{
+					{"id": 10, "video": 1, "variant": "original", "filename": "1/original/source.mp4", "profileRevision": 0},
+					{"id": 20, "video": 2, "variant": "dash", "filename": "2/dash/manifest.mpd", "profileRevision": 3},
+				},
+			})
+		default:
+			t.Fatalf("unexpected request: %s", r.URL.String())
+		}
+	})
+
+	catalogue, err := c.ReadCatalogue(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(videoFilters, []string{"false", "true"}) {
+		t.Errorf("proper_import filters = %v", videoFilters)
+	}
+	if len(catalogue) != 2 || catalogue[1].Files[0].Variant != "original" || catalogue[2].Files[0].ProfileRevision != 3 {
+		t.Errorf("unexpected catalogue: %#v", catalogue)
+	}
+}
+
+func TestClientReadCatalogueRejectsAShortPageWalk(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/videos" {
+			t.Fatalf("unexpected request: %s", r.URL.String())
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"count":   2,
+			"results": []map[string]any{},
+		})
+	})
+
+	_, err := c.ReadCatalogue(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "incomplete catalogue") {
+		t.Fatalf("error = %v, want incomplete catalogue", err)
+	}
+}
+
+func TestClientQueueBackfillSendsExplicitKindAndPriority(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != "/api/videos/42/ingest" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		want := map[string]any{"state": "pending", "kind": "backfill", "priority": float64(7)}
+		if !reflect.DeepEqual(body, want) {
+			t.Errorf("body = %#v, want %#v", body, want)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"video": 42, "state": "pending"})
+	})
+
+	if err := c.QueueBackfill(context.Background(), 42, 7); err != nil {
+		t.Fatal(err)
 	}
 }
 
