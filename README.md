@@ -74,22 +74,26 @@ have (`fk env`, `fk login`) are what they publish to.
 | --- | --- | --- |
 | `contrib/voctoweb-import.py` | media.ccc.de, or any [voctoweb](https://github.com/voc/voctoweb) instance (`--api`) | stdlib only |
 | `contrib/debconf-import.py` | the [Debian meetings archive](https://meetings-archive.debian.net/pub/debian-meetings/): DebConfs, MiniDebConfs and Debian meetings, 2004 onwards | PyYAML |
+| `contrib/defcon-import.py` | the [DEF CON media archive](https://media.defcon.org/), from DEF CON 1 onwards | stdlib only |
 
 ```bash
 # 1. Which events are there?
 contrib/voctoweb-import.py events congress
 contrib/debconf-import.py events minidebconf
+contrib/defcon-import.py events
 
 # 2. Which videos does one hold?
 contrib/voctoweb-import.py videos 38c3 --search rekordbox
 contrib/debconf-import.py videos debconf25 --search kubernetes
+contrib/defcon-import.py videos dc33 --search phrack
 
 # 3. Download the best recording of a video and upload it
 contrib/voctoweb-import.py import 98C007E2-A3B2-44FD-ADF5-D21224DE0988 -c Kultur
 contrib/debconf-import.py import debconf25#39 -c Kultur
+contrib/defcon-import.py import dc33#1 -c Kultur
 ```
 
-Both take several videos at a time. Title, description, speakers and a link back to
+All three take several videos at a time. Title, description, speakers and a link back to
 the source are carried over; the rest is yours to pass: `-c/--category` (Frikanalen
 requires at least one; defaults to `Annet`), `-o/--org-id` and `-s/--series-id`, which
 mean what they do for `fk video create`. Downloads go to a temporary directory that is
@@ -141,6 +145,21 @@ Recordings the inventory flags as non-free are refused unless you pass
 `--allow-non-free`.
 
 Needs PyYAML: `apt install python3-yaml`, or `pip install pyyaml`.
+
+### DEF CON
+
+The DEF CON media server has browsable directory listings rather than an API.
+Events can be named as `33`, `dc33`, `defcon33`, or by an archive URL. Videos use
+the ref printed by `videos` (`dc33#1`); with `--event dc33`, a full file
+name or an unambiguous part of a title works too.
+
+By default, the importer walks the event's video, village, and creator branches,
+plus video files stored at the event root. This avoids trawling large photo, music,
+badge, and software trees. Add `--all-directories` to `videos` or `import` when the
+recording lives in an unusual branch such as a contest or CTF directory. The archive
+does not publish a metadata API, so titles and speakers are derived from its file
+names and every description includes the original download URL.
+
 ## Requirements
 
 ffmpeg is only required for test video generation.
