@@ -90,12 +90,28 @@ environments:
 	}
 }
 
-func TestAPIURLEnvironmentVariableWins(t *testing.T) {
-	writeConfig(t, "environment: prod\n")
-	t.Setenv("FK_API", "http://elsewhere:9000")
+func TestOverrideEnvironmentCarriesItsOwnToken(t *testing.T) {
+	writeConfig(t, `environment: prod
+environments:
+  prod:
+    token: prod-token
+  staging:
+    token: staging-token
+`)
+	t.Cleanup(func() { _ = OverrideEnvironment("") })
 
-	if got := APIURL(); got != "http://elsewhere:9000" {
-		t.Errorf("APIURL() = %q, want $FK_API to win", got)
+	if err := OverrideEnvironment("staging"); err != nil {
+		t.Fatal(err)
+	}
+	if got := APIURL(); got != "https://staging.frikanalen.no" {
+		t.Errorf("APIURL() = %q, want staging's", got)
+	}
+	if got := StoredToken(); got != "staging-token" {
+		t.Errorf("StoredToken() = %q, want staging's own token", got)
+	}
+
+	if err := OverrideEnvironment("nowhere"); err == nil {
+		t.Error("expected an unknown environment to be refused")
 	}
 }
 

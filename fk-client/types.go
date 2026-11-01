@@ -2,15 +2,15 @@ package fk
 
 // SimpleOrg is the minimal organization reference embedded in a User.
 type SimpleOrg struct {
-	Id   int
-	Name string
+	Id   int    `json:"id"`
+	Name string `json:"name"`
 }
 
 // Series is a programme series a video can be an episode of, as returned
 // by GET /api/series.
 type Series struct {
-	Id   int
-	Name string
+	Id   int    `json:"id"`
+	Name string `json:"name"`
 }
 
 // User is the authenticated user's own profile, as returned by GET /api/user.
@@ -48,10 +48,10 @@ type VideoUploadToken struct {
 // IngestJob reports the ingest pipeline's progress for a video's uploaded
 // file, as returned by GET /api/videos/{id}/ingest.
 type IngestJob struct {
-	State          string
-	Kind           string
-	PercentageDone *int
-	ErrorCode      string
+	State          string `json:"state"`
+	Kind           string `json:"kind"`
+	PercentageDone *int   `json:"percentage_done"`
+	ErrorCode      string `json:"error_code"`
 }
 
 // DesiredFormats is the converged state advertised by the ingest deployment.

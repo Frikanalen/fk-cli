@@ -21,15 +21,6 @@ const (
 	queueConcurrency     = 8
 )
 
-var archiveCmd = &cobra.Command{
-	Use:   "archive",
-	Short: "Find and queue archive maintenance",
-	Long: "Sweep django-api for videos whose registered files need maintenance.\n" +
-		"This command does not access the media archive; workers inspect the archive\n" +
-		"and make the final plan after a video is queued.",
-	Args: cobra.NoArgs,
-}
-
 type archiveAPI interface {
 	IngestFormats(context.Context) (*fk.DesiredFormats, error)
 	ReadCatalogue(context.Context) (fk.Catalogue, error)
@@ -42,6 +33,25 @@ type archiveOptions struct {
 	limit    int
 	priority int
 	quiet    bool
+	json     bool
+}
+
+// archiveResult is what an archive sweep prints with --json.
+type archiveResult struct {
+	Image          string               `json:"image"`
+	Videos         []archiveVideoResult `json:"videos"`
+	LookedAt       int                  `json:"looked_at"`
+	WithWork       int                  `json:"with_work"`
+	Applied        bool                 `json:"applied"`
+	Queued         []int                `json:"queued"`
+	AlreadyRunning []int                `json:"already_running"`
+	Failed         map[string]string    `json:"failed"`
+}
+
+type archiveVideoResult struct {
+	Id      int      `json:"id"`
+	Actions []string `json:"actions"`
+	Notes   []string `json:"notes"`
 }
 
 type archiveAction struct {
@@ -247,7 +257,7 @@ func runArchiveSweep(
 	errOut io.Writer,
 ) error {
 	if opts.limit < 0 {
-		return fmt.Errorf("limit must not be negative")
+		return usageErrorf("--limit must not be negative")
 	}
 	if chore != archiveFormatsChore && chore != archiveMetadataChore {
 		return fmt.Errorf("%q is not an archive chore", chore)
@@ -261,7 +271,17 @@ func runArchiveSweep(
 	if image == "" {
 		image = "(not reported)"
 	}
-	fmt.Fprintf(out, "Ingest image: %s\n", image)
+	// Text goes out as it is worked out; with --json, it is all collected
+	// and printed as one document at the end.
+	text := out
+	if opts.json {
+		text = io.Discard
+	}
+	result := archiveResult{
+		Image: desired.Image, Videos: []archiveVideoResult{}, Applied: opts.apply,
+		Queued: []int{}, AlreadyRunning: []int{}, Failed: map[string]string{},
+	}
+	fmt.Fprintf(text, "Ingest image: %s\n", image)
 
 	catalogue, err := client.ReadCatalogue(ctx)
 	if err != nil {
@@ -288,25 +308,46 @@ func runArchiveSweep(
 		if len(plan.actions) > 0 {
 			wanted = append(wanted, id)
 		}
-		if !opts.quiet && (len(plan.actions) > 0 || len(plan.notes) > 0) {
-			fmt.Fprintln(out, plan.describe())
+		if len(plan.actions) > 0 || len(plan.notes) > 0 {
+			entry := archiveVideoResult{Id: id, Actions: []string{}, Notes: plan.notes}
+			for _, action := range plan.actions {
+				entry.Actions = append(entry.Actions, action.description)
+			}
+			if entry.Notes == nil {
+				entry.Notes = []string{}
+			}
+			result.Videos = append(result.Videos, entry)
+			if !opts.quiet {
+				fmt.Fprintln(text, plan.describe())
+			}
+		}
+	}
+	result.LookedAt, result.WithWork = summary.videos, summary.withWork
+
+	fmt.Fprintln(text, summary.report())
+	var report archiveQueueReport
+	switch {
+	case !opts.apply:
+		fmt.Fprintln(errOut, "\nNothing was changed. Pass --apply to put this work in the queue.")
+	case len(wanted) == 0:
+		fmt.Fprintln(text, "\nNothing to queue.")
+	default:
+		report = enqueueArchiveVideos(ctx, client, wanted, opts.priority)
+		fmt.Fprintln(text)
+		fmt.Fprintln(text, report.describe())
+		fmt.Fprintln(errOut, "\nDrain the queue by scaling the worker pool: kubectl scale deployment/ingest-workers --replicas=N")
+		result.Queued = append(result.Queued, report.enqueued...)
+		result.AlreadyRunning = append(result.AlreadyRunning, report.alreadyRunning...)
+		for id, err := range report.failed {
+			result.Failed[strconv.Itoa(id)] = err.Error()
 		}
 	}
 
-	fmt.Fprintln(out, summary.report())
-	if !opts.apply {
-		fmt.Fprintln(out, "\nNothing was changed. `--apply` puts this work in the queue.")
-		return nil
+	if opts.json {
+		if err := printJSON(out, result); err != nil {
+			return err
+		}
 	}
-	if len(wanted) == 0 {
-		fmt.Fprintln(out, "\nNothing to queue.")
-		return nil
-	}
-
-	report := enqueueArchiveVideos(ctx, client, wanted, opts.priority)
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, report.describe())
-	fmt.Fprintln(out, "\nDrain it by scaling the pool: kubectl scale deployment/ingest-workers --replicas=N")
 	if len(report.failed) > 0 {
 		return fmt.Errorf("%d videos could not be queued", len(report.failed))
 	}
@@ -330,7 +371,7 @@ func selectArchiveVideos(args []string, limit int, catalogue fk.Catalogue, errOu
 	for _, raw := range args {
 		id, err := strconv.Atoi(raw)
 		if err != nil || id < 1 {
-			return nil, fmt.Errorf("invalid video ID %q", raw)
+			return nil, usageErrorf("video ID must be a positive number, got %q", raw)
 		}
 		if catalogue[id] == nil {
 			fmt.Fprintf(errOut, "No video %d in the catalogue; ignoring it\n", id)
@@ -446,39 +487,55 @@ func enqueueArchiveVideo(ctx context.Context, client archiveAPI, videoId, priori
 	return queueEnqueued, nil
 }
 
+func newArchiveCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "archive",
+		Short: "Find and queue archive maintenance",
+		Long: "Sweep django-api for videos whose registered files need maintenance.\n" +
+			"This command does not access the media archive; workers inspect the archive\n" +
+			"and make the final plan after a video is queued.",
+	}
+	cmd.AddCommand(
+		newArchiveSweepCmd(
+			"backfill",
+			"Report or queue videos with missing or stale derived formats",
+			archiveFormatsChore,
+		),
+		newArchiveSweepCmd(
+			"refresh-metadata",
+			"Report or queue videos missing duration, frame rate, or loudness",
+			archiveMetadataChore,
+		),
+	)
+	return cmd
+}
+
 func newArchiveSweepCmd(use, short, chore string) *cobra.Command {
 	opts := archiveOptions{}
-	command := &cobra.Command{
-		Use:   use + " [video-id ...]",
+	cmd := &cobra.Command{
+		Use:   use + " [<id>...]",
 		Short: short,
-		Args:  cobra.ArbitraryArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Long: short + ". Looks at the whole catalogue unless video IDs are given.\n" +
+			"Nothing is changed without --apply.",
+		Example: "  fk archive " + use + " --limit 50\n" +
+			"  fk archive " + use + " 12345\n" +
+			"  fk archive " + use + " --apply",
+		Args: args(0, -1),
+		RunE: func(cmd *cobra.Command, argv []string) error {
 			client, err := fk.Open()
 			if err != nil {
 				return err
 			}
 			return runArchiveSweep(
-				cmd.Context(), client, chore, args, opts, cmd.OutOrStdout(), cmd.ErrOrStderr(),
+				cmd.Context(), client, chore, argv, opts, cmd.OutOrStdout(), cmd.ErrOrStderr(),
 			)
 		},
 	}
-	command.Flags().BoolVar(&opts.apply, "apply", false, "Queue the work; without this, only print the plan")
-	command.Flags().IntVar(&opts.limit, "limit", 0, "Stop after this many videos")
-	command.Flags().IntVar(&opts.priority, "priority", defaultQueuePriority, "Claim order among waiting jobs; higher is sooner")
-	command.Flags().BoolVarP(&opts.quiet, "quiet", "q", false, "Print the image and summary only")
-	return command
-}
-
-func init() {
-	rootCmd.AddCommand(archiveCmd)
-	archiveCmd.AddCommand(newArchiveSweepCmd(
-		"backfill",
-		"Report or queue videos with missing or stale derived formats",
-		archiveFormatsChore,
-	))
-	archiveCmd.AddCommand(newArchiveSweepCmd(
-		"refresh-metadata",
-		"Report or queue videos missing duration, frame rate, or loudness",
-		archiveMetadataChore,
-	))
+	flags := cmd.Flags()
+	flags.BoolVar(&opts.apply, "apply", false, "Queue the work; without this, only print the plan")
+	flags.IntVar(&opts.limit, "limit", 0, "Look at no more than this many videos")
+	flags.IntVar(&opts.priority, "priority", defaultQueuePriority, "Claim order among waiting jobs; higher is sooner")
+	flags.BoolVarP(&opts.quiet, "quiet", "q", false, "Print the image and summary only")
+	flags.BoolVar(&opts.json, "json", false, "Print the result as JSON")
+	return cmd
 }

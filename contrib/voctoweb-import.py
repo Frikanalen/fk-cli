@@ -16,7 +16,7 @@ video is addressed by what media.ccc.de calls its event GUID.
 
 Only the standard library is used; the upload itself is delegated to the fk
 binary, which must be on $PATH (or named with --fk) and logged in to the
-environment you want to publish to ("fk env", "fk login"). A recording that
+environment you want to publish to ("fk env", "fk auth login"). A recording that
 carries several video or audio tracks -- a camera mix and a slide capture, a
 talk and its interpretations -- is remuxed down to one of each first, which
 needs ffmpeg; see --no-normalize and --audio-language.

@@ -43,8 +43,27 @@ func builtinAPI(name string) string {
 
 func envKey(name, key string) string { return "environments." + name + "." + key }
 
+// environmentOverride, when set, names the environment for this run only,
+// ahead of the one the configuration file makes active.
+var environmentOverride string
+
+// OverrideEnvironment makes name the active environment for the rest of this
+// process without touching the configuration file. The environment's own API
+// URL and stored token travel together, so a token is never sent to a server
+// it was not issued by. An empty name clears the override.
+func OverrideEnvironment(name string) error {
+	if name != "" && EnvironmentAPI(name) == "" {
+		return fmt.Errorf("unknown environment %q (see fk env list)", name)
+	}
+	environmentOverride = name
+	return nil
+}
+
 // CurrentEnvironment returns the name of the active environment.
 func CurrentEnvironment() string {
+	if environmentOverride != "" {
+		return environmentOverride
+	}
 	if name := viper.GetString("environment"); name != "" {
 		return name
 	}
@@ -61,13 +80,8 @@ func EnvironmentAPI(name string) string {
 	return builtinAPI(name)
 }
 
-// APIURL returns the base URL requests should go to. $FK_API overrides the
-// active environment, for one-off runs against a server that has no
-// environment of its own.
+// APIURL returns the base URL of the active environment.
 func APIURL() string {
-	if api := os.Getenv("FK_API"); api != "" {
-		return api
-	}
 	return EnvironmentAPI(CurrentEnvironment())
 }
 
@@ -81,6 +95,11 @@ func StoredToken() string {
 func SaveToken(token string) error {
 	viper.Set(envKey(CurrentEnvironment(), "token"), token)
 	return viper.WriteConfig()
+}
+
+// ClearToken forgets the auth token stored for the active environment.
+func ClearToken() error {
+	return SaveToken("")
 }
 
 // KnownEnvironments lists the built-in environments merged with any defined
@@ -131,6 +150,7 @@ func UseEnvironment(name, api string) error {
 		viper.Set(envKey(name, "api"), api)
 	}
 	viper.Set("environment", name)
+	environmentOverride = ""
 
 	return viper.WriteConfig()
 }

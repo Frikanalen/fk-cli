@@ -305,18 +305,17 @@ def normalize(path: str, language: str = "") -> None:
 
 
 def fk_create(fk_bin: str, path: str, item: Item, args: argparse.Namespace) -> None:
-    argv = [fk_bin, "video", "create",
+    argv = [fk_bin, "video", "create", path,
             "-t", item.title,
-            "-d", item.description,
-            "-f", path]
+            "-d", item.description]
     for category in args.category or [DEFAULT_CATEGORY]:
         argv += ["-c", category]
-    if args.org_id is not None:
-        argv += ["-o", str(args.org_id)]
-    if args.series_id is not None:
-        argv += ["-s", str(args.series_id)]
+    if args.org is not None:
+        argv += ["--org", str(args.org)]
+    if args.series is not None:
+        argv += ["--series", str(args.series)]
     if args.no_wait:
-        argv.append("--wait=false")
+        argv.append("--no-wait")
 
     if args.dry_run:
         print("would run: " + shlex.join(argv))
@@ -333,10 +332,10 @@ def add_import_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("-c", "--category", action="append", metavar="NAME",
                         help=f"Frikanalen category, repeatable "
                              f"(default: {DEFAULT_CATEGORY})")
-    parser.add_argument("-o", "--org-id", type=int,
+    parser.add_argument("--org", type=int, metavar="ID",
                         help="Frikanalen organization ID (see \"fk org list\"); "
                              "only needed if you edit more than one")
-    parser.add_argument("-s", "--series-id", type=int,
+    parser.add_argument("--series", type=int, metavar="ID",
                         help="Frikanalen series to file the videos under "
                              "(see \"fk series list\")")
     parser.add_argument("--dir", metavar="PATH",
