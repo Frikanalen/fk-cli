@@ -40,6 +40,18 @@ environments:
 Configurations from older versions, which had a single top-level `api`/`token` pair, are
 migrated to this layout automatically on first run.
 
+## Downloading a video's files
+
+```sh
+fk video download -i 12345                      # the original upload
+fk video download -i 12345 --variant broadcast  # or any other registered variant
+fk video download -i 12345 -o ~/Downloads/      # into a directory, or to a file path
+```
+
+The file keeps its archive name unless `--output` says otherwise, and an existing file is
+not overwritten without `--force`. If the video has no file of that variant, the error lists
+the variants it does have.
+
 ## Archive maintenance
 
 `fk archive` finds videos whose catalogue rows say ingest has work to do:
