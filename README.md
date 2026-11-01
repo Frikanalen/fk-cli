@@ -19,12 +19,14 @@ fk env list         # all environments, with the active one marked
 fk env use staging  # switch
 ```
 
-Run `fk login -e you@example.com` to authenticate; the token is stored under the active
-environment.
+Run `fk auth login --email you@example.com` to authenticate; the token is stored under
+the active environment. `fk auth status` shows who you are logged in as, and `fk auth
+logout` forgets the token. From a script, pipe the password in with `--password-stdin`.
 
 `fk env use <name> --api <url>` defines an environment of your own (or points a built-in
-one somewhere else). Setting `FK_API` overrides the active environment's URL for a single
-run, without touching the configuration file.
+one somewhere else). `--env <name>`, or `FK_ENV`, picks an environment for a single
+command without changing the active one. The environment's URL and token always travel
+together, so a token is never sent to a server that did not issue it.
 
 The resulting file looks like this:
 
@@ -40,12 +42,25 @@ environments:
 Configurations from older versions, which had a single top-level `api`/`token` pair, are
 migrated to this layout automatically on first run.
 
-## Downloading a video's files
+## Videos
 
 ```sh
-fk video download -i 12345                      # the original upload
-fk video download -i 12345 --variant broadcast  # or any other registered variant
-fk video download -i 12345 -o ~/Downloads/      # into a directory, or to a file path
+fk video create talk.mov -t "Opening talk" -c Kultur   # create, upload, wait for ingest
+fk video upload 12345 talk.mov                          # (re)upload for an existing video
+fk video status 12345                                   # ingest state, once
+fk video status 12345 --watch                           # follow it to the end
+fk video view 12345                                     # title, org, series, variants, URL
+```
+
+`create` and `upload` wait for ingest to finish unless given `--no-wait`. If one fails
+part-way, the error ends with a `hint:` line naming the command to carry on with.
+
+### Downloading a video's files
+
+```sh
+fk video download 12345                      # the original upload
+fk video download 12345 --variant broadcast  # or any other registered variant
+fk video download 12345 -o ~/Downloads/      # into a directory, or to a file path
 ```
 
 The file keeps its archive name unless `--output` says otherwise, and an existing file is
@@ -80,7 +95,7 @@ the final decision for every queued video. This is separate from the
 publish them here. They share `contrib/fkimport.py`, and all work the same way: list
 the events the archive holds, list one event's videos, then fetch one at its best
 quality and hand it to `fk video create` -- so the environment and login you already
-have (`fk env`, `fk login`) are what they publish to.
+have (`fk env`, `fk auth login`) are what they publish to.
 
 | script | archive | needs |
 | --- | --- | --- |
@@ -103,7 +118,7 @@ contrib/debconf-import.py import debconf25#39 -c Kultur
 
 Both take several videos at a time. Title, description, speakers and a link back to
 the source are carried over; the rest is yours to pass: `-c/--category` (Frikanalen
-requires at least one; defaults to `Annet`), `-o/--org-id` and `-s/--series-id`, which
+requires at least one; defaults to `Annet`), `--org` and `--series`, which
 mean what they do for `fk video create`. Downloads go to a temporary directory that is
 removed after a successful upload -- `--dir` keeps them somewhere of your choosing
 instead, and an interrupted download resumes on the next run. `--dry-run` prints the
@@ -153,9 +168,35 @@ Recordings the inventory flags as non-free are refused unless you pass
 `--allow-non-free`.
 
 Needs PyYAML: `apt install python3-yaml`, or `pip install pyyaml`.
+## Command-line conventions
+
+Every command follows the same rules, so what you learn from one holds for the rest.
+`cmd/conventions_test.go` checks the ones that can be checked mechanically.
+
+- **`fk <noun> <verb> [<id>] [<file>] [flags]`.** The thing a command acts on, and the file
+  it reads, are positional. Flags only modify. Extra arguments are an error, never ignored.
+- **A flag means the same thing everywhere.** Only these have one-letter forms: `-o/--output`
+  (a path to write to), `-f/--force`, `-q/--quiet`, `-v/--verbose`, `-w/--watch`,
+  `-t/--title`, `-d/--description`, `-c/--category`. Flags are named for what they are
+  (`--org`, `--series`), not for their type (`--org-id`).
+- **Long work waits.** A command that starts work on the server waits for it to finish;
+  `--no-wait` returns early. A command that looks at work is a snapshot; `--watch` follows.
+- **stdout is the result.** Progress, logs and hints go to stderr. Tables are drawn as boxes
+  only on a terminal; piped, they are tab-separated with a header line. Every command that
+  returns data takes `--json`. Colour respects `NO_COLOR` and `--no-color`.
+- **Errors look alike.** One line, `fk: <message>`, sometimes followed by `hint: <command>`.
+  Exit codes: 0 success, 1 failure, 2 the command line itself was wrong.
+- **Secrets never go in flags.** Passwords are prompted for, or read with `--password-stdin`.
+
+## Shell completion
+
+`fk completion bash|zsh|fish|powershell` prints a completion script; `fk completion bash
+--help` says where to put it.
+
 ## Requirements
 
-ffmpeg is only required for test video generation.
+ffmpeg is only required for `fk dev testcard`, and for the contrib importers when a
+recording carries extra tracks.
 
 ### Refreshing the API schema and regenerating the client
 

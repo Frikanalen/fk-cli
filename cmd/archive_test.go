@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -87,9 +88,12 @@ func runArchiveFixture(t *testing.T, client *fakeArchiveAPI, chore string, args 
 
 func TestArchiveBackfillDryRunReportsWithoutQueueing(t *testing.T) {
 	client := archiveFixture()
-	stdout, _, err := runArchiveFixture(t, client, archiveFormatsChore, nil, archiveOptions{})
+	stdout, stderr, err := runArchiveFixture(t, client, archiveFormatsChore, nil, archiveOptions{})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(stderr, "Nothing was changed") {
+		t.Errorf("the dry-run notice is missing from stderr:\n%s", stderr)
 	}
 
 	for _, want := range []string{
@@ -99,7 +103,6 @@ func TestArchiveBackfillDryRunReportsWithoutQueueing(t *testing.T) {
 		"4 videos looked at, 1 need something done.",
 		"2  ProduceFormat",
 		"1  no original is registered",
-		"Nothing was changed",
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("output does not contain %q:\n%s", want, stdout)
@@ -258,5 +261,28 @@ func TestArchiveQueueReportIsDeterministic(t *testing.T) {
 	}}
 	if !strings.Contains(report.describe(), "  2: two\n  10: ten") {
 		t.Errorf("failures are not sorted:\n%s", report.describe())
+	}
+}
+
+func TestArchiveJSONCarriesPlanAndQueue(t *testing.T) {
+	client := archiveFixture()
+	client.statuses[100] = &fk.IngestJob{State: fk.IngestStatePending, Kind: "upload"}
+
+	stdout, _, err := runArchiveFixture(t, client, archiveFormatsChore, nil, archiveOptions{apply: true, json: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got archiveResult
+	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+		t.Fatalf("stdout is not JSON: %v\n%s", err, stdout)
+	}
+	if got.Image != "ghcr.io/frikanalen/ingest:v1.2.3" || got.LookedAt != 4 || got.WithWork != 1 || !got.Applied {
+		t.Errorf("summary = %+v", got)
+	}
+	if !reflect.DeepEqual(got.AlreadyRunning, []int{100}) {
+		t.Errorf("already_running = %v, want [100]", got.AlreadyRunning)
+	}
+	if len(got.Videos) != 2 || got.Videos[0].Id != 100 || got.Videos[0].Actions[0] != "produce dash (missing)" {
+		t.Errorf("videos = %+v", got.Videos)
 	}
 }

@@ -1,60 +1,55 @@
 package cmd
 
 import (
-	"context"
-	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github/frikanalen/fk-cli/fk-client"
 	"github/frikanalen/fk-cli/internal/progress"
 
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
-// uploadAndWait uploads fileSpec for videoId and, unless wait is false, follows
-// the resulting ingest job until it finishes, then prints the video's URL. It
-// is shared by "video upload" and by "video create -f". Both phases share one
-// animated progress bar when stderr is a terminal, and become periodic plain
-// lines when it is not.
-func uploadAndWait(ctx context.Context, client *fk.Client, videoId int, fileSpec string, wait bool) error {
+// uploadAndWait uploads fileSpec for videoId and, when wait is set, follows
+// the resulting ingest job until it finishes. It is shared by "video upload"
+// and "video create". Both phases share one progress bar on stderr: animated
+// on a terminal, periodic plain lines otherwise.
+func uploadAndWait(cmd *cobra.Command, client *fk.Client, videoId int, fileSpec string, wait bool) error {
 	name := filepath.Base(fileSpec)
 
 	// Upload and ingest are two phases of one operation, so they take turns
 	// on a single bar rather than leaving a trail of finished ones behind.
-	bar := progress.New(os.Stderr, "Uploading "+name, progress.UnitsBytes)
-	err := client.UploadWithProgress(ctx, videoId, fileSpec, func(uploaded, total int64) {
+	bar := progress.New(cmd.ErrOrStderr(), "Uploading "+name, progress.UnitsBytes)
+	err := client.UploadWithProgress(cmd.Context(), videoId, fileSpec, func(uploaded, total int64) {
 		bar.Update(uploaded, total)
 	})
 	if err != nil {
 		bar.Fail("upload failed")
 		// Nothing usable reached the server, so the file has to go again.
-		return retryHint{err, fmt.Sprintf("fk video upload -i %d -f %s", videoId, fileSpec)}
+		return withHint(err, "fk video upload %d %s", videoId, shellQuote(fileSpec))
 	}
 
 	if !wait {
 		bar.Finish("uploaded")
-		printVideoURL(client, videoId)
 		return nil
 	}
 
 	bar.Next(ingestLabel(fk.IngestStatePending), progress.UnitsNone)
-	return watchIngest(ctx, client, videoId, bar, name)
+	_, err = watchIngest(cmd, client, videoId, bar, name)
+	return err
 }
 
 // watchIngest follows videoId's ingest job on an already-running bar, which it
-// finishes one way or the other, and prints the video's URL once the job is
-// done. closingLabel names what the closing line is about -- the file as a
-// whole, rather than whichever ingest stage happened to run last.
+// finishes one way or the other. closingLabel names what the closing line is
+// about: the file as a whole, rather than whichever ingest stage ran last.
 //
-// It is shared by the tail of an upload and by "video status --wait", which is
+// It is shared by the tail of an upload and by "video status --watch", which is
 // the same watch started on its own: the job belongs to the server, so a watch
 // that was interrupted can simply be opened again.
-func watchIngest(ctx context.Context, client *fk.Client, videoId int, bar *progress.Bar, closingLabel string) error {
-	job, err := client.WaitForIngest(ctx, videoId, fk.IngestWatch{
+func watchIngest(cmd *cobra.Command, client *fk.Client, videoId int, bar *progress.Bar, closingLabel string) (*fk.IngestJob, error) {
+	job, err := client.WaitForIngest(cmd.Context(), videoId, fk.IngestWatch{
 		OnUpdate: func(job fk.IngestJob) {
 			bar.SetLabel(ingestLabel(job.State))
 			if job.PercentageDone != nil {
@@ -75,23 +70,27 @@ func watchIngest(ctx context.Context, client *fk.Client, videoId int, bar *progr
 		bar.Fail("ingest interrupted")
 		// The file is on the server and ingest carries on without us; all
 		// that was lost is the watching, so that is all to start again.
-		return retryHint{err, fmt.Sprintf("fk video status -i %d --wait", videoId)}
+		return nil, withHint(err, "fk video status %d --watch", videoId)
 	}
 	if job.State == fk.IngestStateFailed {
 		bar.Fail("ingest failed")
-		return fmt.Errorf("ingest failed: %s", job.ErrorCode)
+		return job, fmt.Errorf("ingest failed: %s", job.ErrorCode)
 	}
 	bar.SetLabel(closingLabel)
 	bar.Finish("ready to broadcast")
-
-	printVideoURL(client, videoId)
-	return nil
+	return job, nil
 }
 
-// printVideoURL writes the video's page address to stdout, keeping it apart
-// from the progress bar on stderr so it stays pipeable.
-func printVideoURL(client *fk.Client, videoId int) {
-	fmt.Println(client.VideoURL(videoId))
+// shellQuote quotes s for a POSIX shell when it needs it, so a hint can be
+// pasted back as it stands.
+func shellQuote(s string) string {
+	if s != "" && strings.IndexFunc(s, func(r rune) bool {
+		return !(r == '/' || r == '.' || r == '-' || r == '_' || r == '+' || r == ':' || r == ',' || r == '@' ||
+			(r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z'))
+	}) < 0 {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // labelReconnecting stands in for an ingest state while we cannot read one.
@@ -103,65 +102,33 @@ func ingestLabel(state string) string {
 	return fmt.Sprintf("%-*s", len(labelReconnecting), state)
 }
 
-// retryHint pairs a failure with the command that picks up where it left off.
-// Which command that is depends on what was actually lost: an upload that did
-// not land has to send the file again, while an interrupted status display
-// only has to be reopened.
-type retryHint struct {
-	err error
-	cmd string
-}
-
-func (h retryHint) Error() string { return h.err.Error() }
-func (h retryHint) Unwrap() error { return h.err }
-
-// fatalWithHint reports err and exits, naming the command to pick things back
-// up with when the failure came with one.
-func fatalWithHint(err error) {
-	var hint retryHint
-	if errors.As(err, &hint) {
-		log.Errorf("retry with: %s", hint.cmd)
+func newVideoUploadCmd() *cobra.Command {
+	var noWait bool
+	var out output
+	cmd := &cobra.Command{
+		Use:   "upload <id> <file>",
+		Short: "Upload a file for an existing video",
+		Long: "Upload a file for a video that already exists, e.g. to retry a failed\n" +
+			"upload, and wait for ingest to finish. The video's URL is printed on\n" +
+			"stdout. To create a video and upload in one go, use \"fk video create\".",
+		Example: "  fk video upload 12345 talk.mov",
+		Args:    args(2, 2),
+		RunE: func(cmd *cobra.Command, argv []string) error {
+			videoId, err := parseID(argv[0], "video ID")
+			if err != nil {
+				return err
+			}
+			client, err := fk.Open()
+			if err != nil {
+				return err
+			}
+			if err := uploadAndWait(cmd, client, videoId, argv[1], !noWait); err != nil {
+				return err
+			}
+			return printVideoResult(cmd, client, videoId, out)
+		},
 	}
-	log.Fatal(err)
-}
-
-var uploadCmd = &cobra.Command{
-	Use:   "upload",
-	Short: "Upload a file for an existing video",
-	Long: "Upload a file for a video that already exists, e.g. to retry a failed\n" +
-		"upload. To create a video and upload in one go, use \"video create -f\".",
-	Run: func(cmd *cobra.Command, args []string) {
-		client, err := fk.Open()
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		videoId, err := cmd.Flags().GetInt("id")
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		fileSpec, err := cmd.Flags().GetString("file")
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		wait, err := cmd.Flags().GetBool("wait")
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		if err := uploadAndWait(context.Background(), client, videoId, fileSpec, wait); err != nil {
-			fatalWithHint(err)
-		}
-	},
-}
-
-func init() {
-	videoCmd.AddCommand(uploadCmd)
-	uploadCmd.Flags().IntP("id", "i", 0, "ID of the video to upload a file for")
-	_ = uploadCmd.MarkFlagRequired("id")
-	uploadCmd.Flags().StringP("file", "f", "", "Path to file to upload")
-	_ = uploadCmd.MarkFlagRequired("file")
-	uploadCmd.Flags().Bool("wait", true, "Wait for ingest to finish and report its progress")
+	cmd.Flags().BoolVar(&noWait, "no-wait", false, "Return once the file is uploaded, without waiting for ingest")
+	out.addJSONFlag(cmd)
+	return cmd
 }

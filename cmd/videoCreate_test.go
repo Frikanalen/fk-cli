@@ -2,34 +2,11 @@ package cmd
 
 import (
 	"testing"
-
-	"github.com/spf13/pflag"
 )
 
-// newVideoCreateFlagSet mirrors createCmd's flag registration in
-// videoCreate.go's init(), so tests can drive newVideoFromFlags without
-// going through cobra.
-func newVideoCreateFlagSet(t *testing.T) *pflag.FlagSet {
-	t.Helper()
-	flags := pflag.NewFlagSet("create", pflag.ContinueOnError)
-	flags.StringP("title", "t", "", "Title of video")
-	flags.StringP("description", "d", "", "Description of video")
-	flags.StringSliceP("category", "c", []string{}, "Category name (repeatable)")
-	flags.IntP("org-id", "o", 0, "Organization ID")
-	flags.IntP("series-id", "s", 0, "Series ID")
-	return flags
-}
-
-func TestNewVideoFromFlagsWithoutOrgId(t *testing.T) {
-	flags := newVideoCreateFlagSet(t)
-	if err := flags.Parse([]string{"--title", "My video", "--description", "desc", "--category", "news", "--category", "music"}); err != nil {
-		t.Fatal(err)
-	}
-
-	req, err := newVideoFromFlags(flags)
-	if err != nil {
-		t.Fatalf("newVideoFromFlags: %v", err)
-	}
+func TestVideoCreateRequestLeavesUnsetIDsOut(t *testing.T) {
+	opts := &videoCreateOptions{title: "My video", description: "desc", categories: []string{"news", "music"}}
+	req := opts.request(func(string) bool { return false })
 
 	if req.Title != "My video" || req.Description != "desc" {
 		t.Errorf("unexpected title/description: %+v", req)
@@ -37,73 +14,19 @@ func TestNewVideoFromFlagsWithoutOrgId(t *testing.T) {
 	if len(req.Categories) != 2 || req.Categories[0] != "news" || req.Categories[1] != "music" {
 		t.Errorf("unexpected categories: %v", req.Categories)
 	}
-	if req.OrgId != nil {
-		t.Errorf("OrgId = %v, want nil when --org-id was not passed", *req.OrgId)
+	if req.OrgId != nil || req.SeriesId != nil {
+		t.Errorf("expected no org or series, got %v / %v", req.OrgId, req.SeriesId)
 	}
 }
 
-func TestNewVideoFromFlagsWithOrgId(t *testing.T) {
-	flags := newVideoCreateFlagSet(t)
-	if err := flags.Parse([]string{"--title", "My video", "--category", "news", "--org-id", "3"}); err != nil {
-		t.Fatal(err)
-	}
+func TestVideoCreateRequestCarriesGivenIDs(t *testing.T) {
+	opts := &videoCreateOptions{title: "x", categories: []string{"news"}, orgId: 42, seriesId: 7}
+	req := opts.request(func(name string) bool { return name == "org" || name == "series" })
 
-	req, err := newVideoFromFlags(flags)
-	if err != nil {
-		t.Fatalf("newVideoFromFlags: %v", err)
+	if req.OrgId == nil || *req.OrgId != 42 {
+		t.Errorf("expected org 42, got %v", req.OrgId)
 	}
-
-	if req.OrgId == nil || *req.OrgId != 3 {
-		t.Errorf("OrgId = %v, want pointer to 3", req.OrgId)
-	}
-}
-
-func TestNewVideoFromFlagsOrgIdZeroIsStillExplicit(t *testing.T) {
-	// A user who explicitly passes --org-id 0 should have that sent
-	// through, distinct from not passing the flag at all.
-	flags := newVideoCreateFlagSet(t)
-	if err := flags.Parse([]string{"--title", "My video", "--category", "news", "--org-id", "0"}); err != nil {
-		t.Fatal(err)
-	}
-
-	req, err := newVideoFromFlags(flags)
-	if err != nil {
-		t.Fatalf("newVideoFromFlags: %v", err)
-	}
-
-	if req.OrgId == nil || *req.OrgId != 0 {
-		t.Errorf("OrgId = %v, want pointer to 0", req.OrgId)
-	}
-}
-
-func TestNewVideoFromFlagsWithoutSeriesId(t *testing.T) {
-	flags := newVideoCreateFlagSet(t)
-	if err := flags.Parse([]string{"--title", "My video", "--category", "news"}); err != nil {
-		t.Fatal(err)
-	}
-
-	req, err := newVideoFromFlags(flags)
-	if err != nil {
-		t.Fatalf("newVideoFromFlags: %v", err)
-	}
-
-	if req.SeriesId != nil {
-		t.Errorf("SeriesId = %v, want nil when --series-id was not passed", *req.SeriesId)
-	}
-}
-
-func TestNewVideoFromFlagsWithSeriesId(t *testing.T) {
-	flags := newVideoCreateFlagSet(t)
-	if err := flags.Parse([]string{"--title", "My video", "--category", "news", "--series-id", "8"}); err != nil {
-		t.Fatal(err)
-	}
-
-	req, err := newVideoFromFlags(flags)
-	if err != nil {
-		t.Fatalf("newVideoFromFlags: %v", err)
-	}
-
-	if req.SeriesId == nil || *req.SeriesId != 8 {
-		t.Errorf("SeriesId = %v, want pointer to 8", req.SeriesId)
+	if req.SeriesId == nil || *req.SeriesId != 7 {
+		t.Errorf("expected series 7, got %v", req.SeriesId)
 	}
 }

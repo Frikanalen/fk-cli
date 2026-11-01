@@ -1,117 +1,98 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 
 	"github/frikanalen/fk-cli/fk-client"
 
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 )
 
-func newVideoFromFlags(flags *pflag.FlagSet) (*fk.CreateVideoRequest, error) {
-	title, err := flags.GetString("title")
-	if err != nil {
-		return nil, err
-	}
+// videoCreateOptions holds the flags of "video create".
+type videoCreateOptions struct {
+	title       string
+	description string
+	categories  []string
+	orgId       int
+	seriesId    int
+	noWait      bool
+	out         output
+}
 
-	description, err := flags.GetString("description")
-	if err != nil {
-		return nil, err
+// request builds the API request from the options. Changed reports which
+// optional flags were given, so an unset --org or --series is left out
+// rather than sent as 0.
+func (o *videoCreateOptions) request(changed func(string) bool) fk.CreateVideoRequest {
+	req := fk.CreateVideoRequest{
+		Title:       o.title,
+		Description: o.description,
+		Categories:  o.categories,
 	}
-
-	categories, err := flags.GetStringSlice("category")
-	if err != nil {
-		return nil, err
-	}
-
-	req := &fk.CreateVideoRequest{
-		Title:       title,
-		Description: description,
-		Categories:  categories,
-	}
-
-	if flags.Changed("org-id") {
-		orgId, err := flags.GetInt("org-id")
-		if err != nil {
-			return nil, err
-		}
+	if changed("org") {
+		orgId := o.orgId
 		req.OrgId = &orgId
 	}
-
-	if flags.Changed("series-id") {
-		seriesId, err := flags.GetInt("series-id")
-		if err != nil {
-			return nil, err
-		}
+	if changed("series") {
+		seriesId := o.seriesId
 		req.SeriesId = &seriesId
 	}
-
-	return req, nil
+	return req
 }
 
-var createCmd = &cobra.Command{
-	Use:   "create",
-	Short: "Create video, optionally uploading a file for it",
-	Long: "Create a video. With -f, the file is uploaded for the newly created\n" +
-		"video as well, and the video's URL is printed once it is ready. If\n" +
-		"anything fails, the command reports the ID and the command to carry\n" +
-		"on with: \"video upload\" when the file did not make it across, and\n" +
-		"\"video status --wait\" when it did and only the watching stopped.",
-	Run: func(cmd *cobra.Command, args []string) {
-		client, err := fk.Open()
-		if err != nil {
-			log.Fatal(err)
-		}
+func newVideoCreateCmd() *cobra.Command {
+	opts := &videoCreateOptions{}
+	cmd := &cobra.Command{
+		Use:   "create [<file>]",
+		Short: "Create a video, and upload its file if one is given",
+		Long: "Create a video. Given a file, upload it and wait for ingest to finish,\n" +
+			"showing progress on stderr. The video's URL is printed on stdout.\n" +
+			"\n" +
+			"If anything fails after the video exists, the error names the command\n" +
+			"to carry on with: \"fk video upload\" when the file did not make it\n" +
+			"across, \"fk video status --watch\" when only the watching stopped.",
+		Example: "  fk video create talk.mov -t \"Opening talk\" -c Kultur\n" +
+			"  fk video create -t \"Placeholder\" -c Annet --series 12",
+		Args: args(0, 1),
+		RunE: func(cmd *cobra.Command, argv []string) error {
+			client, err := fk.Open()
+			if err != nil {
+				return err
+			}
+			videoId, err := client.CreateVideo(cmd.Context(), opts.request(cmd.Flags().Changed))
+			if err != nil {
+				return err
+			}
 
-		newVideoBody, err := newVideoFromFlags(cmd.Flags())
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		fileSpec, err := cmd.Flags().GetString("file")
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		wait, err := cmd.Flags().GetBool("wait")
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		ctx := context.Background()
-
-		videoId, err := client.CreateVideo(ctx, *newVideoBody)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		if fileSpec == "" {
-			fmt.Println(client.VideoURL(videoId))
-			return
-		}
-
-		// The ID is not printed up front any more, so the failure has to hand
-		// it over -- as part of the command that resumes from wherever it got
-		// to, which is not the same command for a lost upload as for a lost
-		// view of the ingest that follows one.
-		if err := uploadAndWait(ctx, client, videoId, fileSpec, wait); err != nil {
-			fatalWithHint(err)
-		}
-	},
+			if len(argv) == 1 {
+				// The ID is not printed up front, so a failure hands it over
+				// as part of the command that resumes from where it stopped.
+				if err := uploadAndWait(cmd, client, videoId, argv[0], !opts.noWait); err != nil {
+					return err
+				}
+			}
+			return printVideoResult(cmd, client, videoId, opts.out)
+		},
+	}
+	flags := cmd.Flags()
+	flags.StringVarP(&opts.title, "title", "t", "", "Title of the video")
+	flags.StringVarP(&opts.description, "description", "d", "", "Description of the video")
+	flags.StringArrayVarP(&opts.categories, "category", "c", nil, "Category name (repeat for several)")
+	flags.IntVar(&opts.orgId, "org", 0, "Organization ID (only needed if you belong to several; see fk org list)")
+	flags.IntVar(&opts.seriesId, "series", 0, "Series ID to file the video under (see fk series list)")
+	flags.BoolVar(&opts.noWait, "no-wait", false, "Return once the file is uploaded, without waiting for ingest")
+	_ = cmd.MarkFlagRequired("title")
+	_ = cmd.MarkFlagRequired("category")
+	opts.out.addJSONFlag(cmd)
+	return cmd
 }
 
-func init() {
-	videoCmd.AddCommand(createCmd)
-	createCmd.Flags().StringP("title", "t", "", "Title of video")
-	_ = createCmd.MarkFlagRequired("title")
-	createCmd.Flags().StringP("description", "d", "", "Description of video")
-	createCmd.Flags().StringSliceP("category", "c", []string{}, "Category name (repeatable)")
-	_ = createCmd.MarkFlagRequired("category")
-	createCmd.Flags().IntP("org-id", "o", 0, "Organization ID (only needed if you edit more than one)")
-	createCmd.Flags().IntP("series-id", "s", 0, "Series ID to file the video under (see \"fk series list\")")
-	createCmd.Flags().StringP("file", "f", "", "Path to file to upload for the new video")
-	createCmd.Flags().Bool("wait", true, "With -f, wait for ingest to finish and report its progress")
+// printVideoResult writes the video's URL, or its ID and URL as JSON, to
+// stdout, apart from the progress shown on stderr so it stays pipeable.
+func printVideoResult(cmd *cobra.Command, client *fk.Client, videoId int, out output) error {
+	result := videoResult{Id: videoId, URL: client.VideoURL(videoId)}
+	if out.json {
+		return printJSON(cmd.OutOrStdout(), result)
+	}
+	fmt.Fprintln(cmd.OutOrStdout(), result.URL)
+	return nil
 }

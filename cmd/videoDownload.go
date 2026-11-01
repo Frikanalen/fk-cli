@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -16,37 +15,60 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var downloadCmd = &cobra.Command{
-	Use:   "download",
-	Short: "Download one of a video's files",
-	Long: "Download a file registered for a video. By default this is the\n" +
-		"original upload; --variant picks another, e.g. broadcast or webm_med.\n" +
-		"\n" +
-		"The file lands in the current directory under its archive name unless\n" +
-		"--output says otherwise, and an existing file is left alone unless\n" +
-		"--force is given. The saved path is printed on stdout.",
-	Args: cobra.NoArgs,
-	Run: func(cmd *cobra.Command, args []string) {
-		client, err := fk.Open()
-		checkErr(err)
-
-		videoId, err := cmd.Flags().GetInt("id")
-		checkErr(err)
-		variant, err := cmd.Flags().GetString("variant")
-		checkErr(err)
-		output, err := cmd.Flags().GetString("output")
-		checkErr(err)
-		force, err := cmd.Flags().GetBool("force")
-		checkErr(err)
-
-		dest, err := downloadVideoFile(context.Background(), client, videoId, variant, output, force)
-		checkErr(err)
-		fmt.Println(dest)
-	},
+// downloadResult is what "video download --json" prints.
+type downloadResult struct {
+	Id      int    `json:"id"`
+	Variant string `json:"variant"`
+	Path    string `json:"path"`
 }
 
-func downloadVideoFile(ctx context.Context, client *fk.Client, videoId int, variant, output string, force bool) (string, error) {
-	link, err := client.VideoFile(ctx, videoId, variant)
+func newVideoDownloadCmd() *cobra.Command {
+	var variant, outputPath string
+	var force bool
+	var out output
+	cmd := &cobra.Command{
+		Use:   "download <id>",
+		Short: "Download one of a video's files",
+		Long: "Download a file registered for a video. By default this is the\n" +
+			"original upload; --variant picks another, e.g. broadcast or webm_med\n" +
+			"(\"fk video view\" lists them).\n" +
+			"\n" +
+			"The file lands in the current directory under its archive name unless\n" +
+			"--output says otherwise, and an existing file is left alone unless\n" +
+			"--force is given. The saved path is printed on stdout.",
+		Example: "  fk video download 12345\n" +
+			"  fk video download 12345 --variant broadcast -o ~/Downloads/",
+		Args: args(1, 1),
+		RunE: func(cmd *cobra.Command, argv []string) error {
+			videoId, err := parseID(argv[0], "video ID")
+			if err != nil {
+				return err
+			}
+			client, err := fk.Open()
+			if err != nil {
+				return err
+			}
+			dest, err := downloadVideoFile(cmd, client, videoId, variant, outputPath, force)
+			if err != nil {
+				return err
+			}
+			if out.json {
+				return printJSON(cmd.OutOrStdout(), downloadResult{Id: videoId, Variant: variant, Path: dest})
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), dest)
+			return nil
+		},
+	}
+	flags := cmd.Flags()
+	flags.StringVar(&variant, "variant", fk.VariantOriginal, "Which of the video's files to fetch")
+	flags.StringVarP(&outputPath, "output", "o", "", "File path or existing directory to save to (default: archive file name in the current directory)")
+	flags.BoolVarP(&force, "force", "f", false, "Overwrite the destination if it already exists")
+	out.addJSONFlag(cmd)
+	return cmd
+}
+
+func downloadVideoFile(cmd *cobra.Command, client *fk.Client, videoId int, variant, output string, force bool) (string, error) {
+	link, err := client.VideoFile(cmd.Context(), videoId, variant)
 	if err != nil {
 		return "", err
 	}
@@ -57,14 +79,14 @@ func downloadVideoFile(ctx context.Context, client *fk.Client, videoId int, vari
 	}
 	if !force {
 		if _, err := os.Stat(dest); err == nil {
-			return "", fmt.Errorf("%s already exists; use --force to overwrite it", dest)
+			return "", fmt.Errorf("%s already exists; pass --force to overwrite it", dest)
 		} else if !errors.Is(err, fs.ErrNotExist) {
 			return "", err
 		}
 	}
 
-	bar := progress.New(os.Stderr, "Downloading "+filepath.Base(dest), progress.UnitsBytes)
-	err = client.Download(ctx, link.URL, dest, func(received, total int64) {
+	bar := progress.New(cmd.ErrOrStderr(), "Downloading "+filepath.Base(dest), progress.UnitsBytes)
+	err = client.Download(cmd.Context(), link.URL, dest, func(received, total int64) {
 		bar.Update(received, total)
 	})
 	if err != nil {
@@ -95,13 +117,4 @@ func downloadDest(fileURL, output string) (string, error) {
 		return filepath.Join(output, name), nil
 	}
 	return output, nil
-}
-
-func init() {
-	videoCmd.AddCommand(downloadCmd)
-	downloadCmd.Flags().IntP("id", "i", 0, "ID of the video to download a file of")
-	_ = downloadCmd.MarkFlagRequired("id")
-	downloadCmd.Flags().StringP("variant", "V", fk.VariantOriginal, "Which of the video's files to fetch (original, broadcast, webm_med, ...)")
-	downloadCmd.Flags().StringP("output", "o", "", "Where to save it: a file path or an existing directory (default: archive file name in the current directory)")
-	downloadCmd.Flags().BoolP("force", "F", false, "Overwrite the destination if it already exists")
 }
