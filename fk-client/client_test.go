@@ -304,7 +304,7 @@ func TestClientUploadToken(t *testing.T) {
 		}
 		writeJSON(w, http.StatusOK, map[string]string{
 			"uploadToken": "tok-xyz",
-			"uploadUrl":   "https://staging.frikanalen.no/upload",
+			"uploadUrl":   "https://staging.frikanalen.tv/upload",
 		})
 	})
 
@@ -312,7 +312,7 @@ func TestClientUploadToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UploadToken: %v", err)
 	}
-	if token.UploadToken != "tok-xyz" || token.UploadURL != "https://staging.frikanalen.no/upload" {
+	if token.UploadToken != "tok-xyz" || token.UploadURL != "https://staging.frikanalen.tv/upload" {
 		t.Errorf("unexpected token: %+v", token)
 	}
 }
@@ -462,8 +462,8 @@ func TestClientQueueBackfillSendsExplicitKindAndPriority(t *testing.T) {
 
 func TestVideoURLPointsAtTheDeploymentsWebsite(t *testing.T) {
 	cases := map[string]string{
-		"https://frikanalen.no":  "https://frikanalen.no/video/628648",
-		"https://frikanalen.no/": "https://frikanalen.no/video/628648",
+		"https://frikanalen.tv":  "https://frikanalen.tv/video/628648",
+		"https://frikanalen.tv/": "https://frikanalen.tv/video/628648",
 		"http://localhost:8000":  "http://localhost:8000/video/628648",
 	}
 	for base, want := range cases {
