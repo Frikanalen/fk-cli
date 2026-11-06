@@ -28,8 +28,8 @@ type Environment struct {
 // may add environments of its own.
 var builtinEnvironments = []struct{ name, api string }{
 	{"local", "http://localhost:8000"},
-	{"staging", "https://staging.frikanalen.no"},
-	{"prod", "https://frikanalen.no"},
+	{"staging", "https://staging.frikanalen.tv"},
+	{"prod", "https://frikanalen.tv"},
 }
 
 func builtinAPI(name string) string {
