@@ -63,7 +63,7 @@ environments:
     token: staging-token
 `)
 
-	if got := APIURL(); got != "https://staging.frikanalen.no" {
+	if got := APIURL(); got != "https://staging.frikanalen.tv" {
 		t.Errorf("APIURL() = %q, want the built-in staging URL", got)
 	}
 	if got := StoredToken(); got != "staging-token" {
@@ -103,7 +103,7 @@ environments:
 	if err := OverrideEnvironment("staging"); err != nil {
 		t.Fatal(err)
 	}
-	if got := APIURL(); got != "https://staging.frikanalen.no" {
+	if got := APIURL(); got != "https://staging.frikanalen.tv" {
 		t.Errorf("APIURL() = %q, want staging's", got)
 	}
 	if got := StoredToken(); got != "staging-token" {
@@ -170,7 +170,7 @@ environments:
 
 func TestMigrateLegacyConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".frikanalen.yaml")
-	if err := os.WriteFile(path, []byte("api: https://frikanalen.no\ntoken: legacy\nkeep: me\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("api: https://frikanalen.tv\ntoken: legacy\nkeep: me\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -204,7 +204,7 @@ func TestMigrateLegacyConfig(t *testing.T) {
 	if !ok {
 		t.Fatalf("environments.prod = %v, want a map", envs["prod"])
 	}
-	if prod["api"] != "https://frikanalen.no" || prod["token"] != "legacy" {
+	if prod["api"] != "https://frikanalen.tv" || prod["token"] != "legacy" {
 		t.Errorf("unexpected prod environment: %v", prod)
 	}
 

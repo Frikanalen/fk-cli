@@ -26,7 +26,7 @@ import urllib.request
 
 # Frikanalen requires at least one category on every video; "Annet" (other) is
 # the one that fits an arbitrary conference talk. "fk video create -c" takes the
-# category's name, and the full list lives at <https://frikanalen.no/api/categories>.
+# category's name, and the full list lives at <https://frikanalen.tv/api/categories>.
 DEFAULT_CATEGORY = "Annet"
 
 TITLE_MAX = 255  # Frikanalen's limit on a video's name
