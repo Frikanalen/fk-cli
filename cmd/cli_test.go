@@ -38,6 +38,19 @@ func newFakeAPI(t *testing.T) *fakeAPI {
 				"editorOf": []map[string]any{{"id": 7, "name": "Frikanalen"}},
 				"memberOf": []map[string]any{},
 			})
+		case "/api/obtain-token":
+			var body map[string]string
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			switch body["otp"] {
+			case "":
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"type":"validation_error","errors":[{"code":"otp_required","detail":"Skriv inn koden fra autentiseringsappen.","attr":"otp"}]}`))
+			case "123456":
+				_ = json.NewEncoder(w).Encode(map[string]string{"token": "new-token"})
+			default:
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"type":"validation_error","errors":[{"code":"invalid","detail":"Koden stemmer ikke.","attr":"otp"}]}`))
+			}
 		case "/api/videos/7/ingest":
 			_ = json.NewEncoder(w).Encode(api.ingest)
 		case "/api/videos/500/ingest":
@@ -213,6 +226,49 @@ func TestLoginRefusesToPromptWithoutATerminal(t *testing.T) {
 	api := newFakeAPI(t)
 	_, stderr, code := runFK(t, api, "auth", "login", "--email", "a@example.com")
 	if code != exitUsage || !strings.Contains(stderr, "--password-stdin") {
+		t.Errorf("exit %d, stderr %q", code, stderr)
+	}
+}
+
+// withStdin feeds text to the command's stdin for the rest of the test.
+func withStdin(t *testing.T, text string) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.WriteString(text); err != nil {
+		t.Fatal(err)
+	}
+	_ = w.Close()
+	old := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = old; _ = r.Close() })
+}
+
+func TestLoginWithTwoFactorFromAScriptNeedsOTP(t *testing.T) {
+	api := newFakeAPI(t)
+	withStdin(t, "hunter2\n")
+	_, stderr, code := runFK(t, api, "auth", "login", "--email", "a@example.com", "--password-stdin")
+	if code != exitUsage || !strings.Contains(stderr, "--otp") {
+		t.Errorf("exit %d, stderr %q", code, stderr)
+	}
+}
+
+func TestLoginWithOTP(t *testing.T) {
+	api := newFakeAPI(t)
+	withStdin(t, "hunter2\n")
+	_, stderr, code := runFK(t, api, "auth", "login", "--email", "a@example.com", "--password-stdin", "--otp", "123456")
+	if code != exitOK || !strings.Contains(stderr, "Logged in") {
+		t.Errorf("exit %d, stderr %q", code, stderr)
+	}
+}
+
+func TestLoginWithAWrongOTP(t *testing.T) {
+	api := newFakeAPI(t)
+	withStdin(t, "hunter2\n")
+	_, stderr, code := runFK(t, api, "auth", "login", "--email", "a@example.com", "--password-stdin", "--otp", "000000")
+	if code != exitFailure || !strings.Contains(stderr, "Koden stemmer ikke") {
 		t.Errorf("exit %d, stderr %q", code, stderr)
 	}
 }

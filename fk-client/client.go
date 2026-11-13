@@ -6,6 +6,7 @@ package fk
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -99,6 +100,29 @@ type APIError struct {
 func (e *APIError) Error() string { return fmt.Sprintf("%d: %s", e.Status, e.Detail) }
 func (e *APIError) Unwrap() error { return e.err }
 
+// ErrOTPRequired is what Login fails with, via errors.Is, when the account
+// has two-factor authentication and no code was given: ask for one and log
+// in again with it.
+var ErrOTPRequired = errors.New("a code from the authenticator app is required")
+
+// Is lets errors.Is match ErrOTPRequired without changing the message.
+func (e *APIError) Is(target error) bool {
+	return target == ErrOTPRequired && e.hasCode("otp", "otp_required")
+}
+
+func (e *APIError) hasCode(attr, code string) bool {
+	var envelope *apiErrors
+	if !errors.As(e.err, &envelope) {
+		return false
+	}
+	for _, item := range envelope.Errors {
+		if item.Attr == attr && item.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
 // checkResponse turns a non-2xx status into an error, preferring the API's
 // structured {type, errors} envelope when the body has one.
 func checkResponse(status int, body []byte) error {
@@ -135,11 +159,19 @@ func simpleOrgs(orgs *[]apiclient.SimpleOrg) []SimpleOrg {
 // POST /api/obtain-token and caches it on the client for subsequent
 // requests. It does not persist the token anywhere; call Token after a
 // successful Login and store it yourself if it should outlive the process.
-func (c *Client) Login(ctx context.Context, email, password string) error {
-	resp, err := c.api.ObtainTokenCreateWithResponse(ctx, apiclient.ObtainTokenCreateJSONRequestBody{
+//
+// otp is a code from the authenticator app, or a recovery code, for an
+// account with two-factor authentication; leave it empty otherwise. An
+// account that needs one and got none fails with ErrOTPRequired.
+func (c *Client) Login(ctx context.Context, email, password, otp string) error {
+	body := apiclient.ObtainTokenCreateJSONRequestBody{
 		Username: &email,
 		Password: &password,
-	})
+	}
+	if otp != "" {
+		body.Otp = &otp
+	}
+	resp, err := c.api.ObtainTokenCreateWithResponse(ctx, body)
 	if err != nil {
 		return fmt.Errorf("performing request: %w", err)
 	}

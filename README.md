@@ -22,6 +22,8 @@ fk env use staging  # switch
 Run `fk auth login --email you@example.com` to authenticate; the token is stored under
 the active environment. `fk auth status` shows who you are logged in as, and `fk auth
 logout` forgets the token. From a script, pipe the password in with `--password-stdin`.
+If the account has two-factor authentication, login asks for the code from the
+authenticator app (or a recovery code); from a script, pass it with `--otp`.
 
 `fk env use <name> --api <url>` defines an environment of your own (or points a built-in
 one somewhere else). `--env <name>`, or `FK_ENV`, picks an environment for a single
