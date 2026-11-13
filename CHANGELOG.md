@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/Frikanalen/fk-cli/compare/v0.3.0...v0.4.0) (2026-11-13)
+
+
+### Features
+
+* **auth:** take a two-factor code on login ([#20](https://github.com/Frikanalen/fk-cli/issues/20)) ([51df36c](https://github.com/Frikanalen/fk-cli/commit/51df36c279566ff3f6b8cd4d16df2ee6d55991dc))
+
 ## [0.3.0](https://github.com/Frikanalen/fk-cli/compare/v0.2.0...v0.3.0) (2026-11-08)
 
 
