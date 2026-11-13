@@ -3,6 +3,7 @@ package fk
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -146,7 +147,7 @@ func TestClientLoginSuccess(t *testing.T) {
 		writeJSON(w, http.StatusOK, map[string]string{"token": "abc123"})
 	})
 
-	if err := c.Login(context.Background(), "user@example.com", "hunter2"); err != nil {
+	if err := c.Login(context.Background(), "user@example.com", "hunter2", ""); err != nil {
 		t.Fatalf("Login: %v", err)
 	}
 	if c.Token() != "abc123" {
@@ -164,7 +165,7 @@ func TestClientLoginFailure(t *testing.T) {
 		_, _ = w.Write([]byte(`{"type":"validation_error","errors":[{"code":"authorization","detail":"Unable to log in with provided credentials.","attr":"non_field_errors"}]}`))
 	})
 
-	err := c.Login(context.Background(), "user@example.com", "wrong")
+	err := c.Login(context.Background(), "user@example.com", "wrong", "")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -573,5 +574,69 @@ func TestClientListSeriesPropagatesErrors(t *testing.T) {
 	const want = "401: Authentication credentials were not provided."
 	if err.Error() != want {
 		t.Errorf("ListSeries error = %q, want %q", err.Error(), want)
+	}
+}
+
+func TestClientLoginSendsTheOTP(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["otp"] != "123456" {
+			t.Fatalf("otp = %q, want %q", body["otp"], "123456")
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"token": "abc123"})
+	})
+
+	if err := c.Login(context.Background(), "user@example.com", "hunter2", "123456"); err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+}
+
+func TestClientLoginLeavesOutAnEmptyOTP(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := body["otp"]; ok {
+			t.Fatalf("otp sent although empty: %+v", body)
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"token": "abc123"})
+	})
+
+	if err := c.Login(context.Background(), "user@example.com", "hunter2", ""); err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+}
+
+func TestClientLoginTellsWhenACodeIsNeeded(t *testing.T) {
+	answer := `{"type":"validation_error","errors":[{"code":"otp_required","detail":"Skriv inn koden fra autentiseringsappen.","attr":"otp"}]}`
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(answer))
+	})
+
+	err := c.Login(context.Background(), "user@example.com", "hunter2", "")
+	if !errors.Is(err, ErrOTPRequired) {
+		t.Fatalf("Login error = %v, want ErrOTPRequired", err)
+	}
+	if want := "400: otp: Skriv inn koden fra autentiseringsappen."; err.Error() != want {
+		t.Errorf("Login error = %q, want %q", err.Error(), want)
+	}
+}
+
+func TestClientLoginWrongCodeIsNotOTPRequired(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"type":"validation_error","errors":[{"code":"invalid","detail":"Koden stemmer ikke.","attr":"otp"}]}`))
+	})
+
+	err := c.Login(context.Background(), "user@example.com", "hunter2", "000000")
+	if err == nil || errors.Is(err, ErrOTPRequired) {
+		t.Fatalf("Login error = %v, want a plain refusal", err)
 	}
 }

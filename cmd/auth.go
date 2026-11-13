@@ -24,7 +24,7 @@ func newAuthCmd() *cobra.Command {
 }
 
 func newAuthLoginCmd() *cobra.Command {
-	var email string
+	var email, otp string
 	var passwordStdin bool
 	cmd := &cobra.Command{
 		Use:   "login",
@@ -33,9 +33,14 @@ func newAuthLoginCmd() *cobra.Command {
 			"\n" +
 			"The password is prompted for on a terminal. To log in from a script,\n" +
 			"pipe it in with --password-stdin; it is never taken as a flag value,\n" +
-			"where it would end up in shell history and the process list.",
+			"where it would end up in shell history and the process list.\n" +
+			"\n" +
+			"An account with two-factor authentication also needs a code from the\n" +
+			"authenticator app, or one of the recovery codes. On a terminal it is\n" +
+			"asked for when the server wants it; from a script, pass it with --otp.",
 		Example: "  fk auth login --email you@example.com\n" +
-			"  pass show frikanalen | fk auth login --email you@example.com --password-stdin",
+			"  pass show frikanalen | fk auth login --email you@example.com --password-stdin\n" +
+			"  pass show frikanalen | fk auth login --email you@example.com --password-stdin --otp 123456",
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if email == "" {
@@ -50,7 +55,16 @@ func newAuthLoginCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := client.Login(cmd.Context(), email, password); err != nil {
+			err = client.Login(cmd.Context(), email, password, otp)
+			if errors.Is(err, fk.ErrOTPRequired) && otp == "" {
+				// The password was right; ask for the code and try again.
+				code, promptErr := promptOTP(cmd, passwordStdin)
+				if promptErr != nil {
+					return promptErr
+				}
+				err = client.Login(cmd.Context(), email, password, code)
+			}
+			if err != nil {
 				return fmt.Errorf("logging in: %w", err)
 			}
 			if err := fk.SaveToken(client.Token()); err != nil {
@@ -62,7 +76,27 @@ func newAuthLoginCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&email, "email", "", "Email address to log in with")
 	cmd.Flags().BoolVar(&passwordStdin, "password-stdin", false, "Read the password from stdin")
+	cmd.Flags().StringVar(&otp, "otp", "", "Code from the authenticator app, or a recovery code, for an account with two-factor authentication")
 	return cmd
+}
+
+// promptOTP asks for the two-factor code on the terminal. Without one (or
+// when stdin carried the password) the code has to come from --otp.
+func promptOTP(cmd *cobra.Command, passwordStdin bool) (string, error) {
+	fd := int(os.Stdin.Fd())
+	if passwordStdin || !term.IsTerminal(fd) {
+		return "", usageErrorf("this account has two-factor authentication; pass the code from the authenticator app with --otp")
+	}
+	fmt.Fprint(cmd.ErrOrStderr(), "Code from the authenticator app (or a recovery code): ")
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", fmt.Errorf("reading code: %w", err)
+	}
+	code := strings.TrimSpace(line)
+	if code == "" {
+		return "", usageErrorf("no code given")
+	}
+	return code, nil
 }
 
 // readPassword takes the password from stdin when asked to, and otherwise
