@@ -12,32 +12,43 @@ import (
 	"testing"
 )
 
-// videoAPI is a stand-in for /api/videos/42 that keeps one record and
-// applies PUT and PATCH to it the way DRF does: fields given replace the
-// stored ones.
+// videoAPI is a stand-in for /api/videos/42 and /api/videos/43 that keeps
+// their records and applies PUT and PATCH to them the way DRF does: fields
+// given replace the stored ones.
 type videoAPI struct {
 	*fakeAPI
-	mu      sync.Mutex
-	record  map[string]any
-	methods []string
-	bodies  []map[string]any
+	mu       sync.Mutex
+	records  map[string]map[string]any
+	methods  []string
+	requests []string // "PATCH /api/videos/43"
+	bodies   []map[string]any
 }
 
 func newVideoAPI(t *testing.T) *videoAPI {
 	t.Helper()
-	v := &videoAPI{record: map[string]any{
-		"id": 42, "name": "Old title", "description": "Old description",
-		"categories": []any{"Kultur"}, "publishOnWeb": true,
-		"series": map[string]any{"id": 3, "name": "NUUG"},
+	v := &videoAPI{records: map[string]map[string]any{
+		"/api/videos/42": {
+			"id": 42, "name": "Old title", "description": "Old description",
+			"categories": []any{"Kultur"}, "publishOnWeb": true, "framerate": 25000,
+			"series": map[string]any{"id": 3, "name": "NUUG"},
+		},
+		"/api/videos/43": {
+			"id": 43, "name": "Other video", "description": "Line one\nLine two\n",
+			"categories": []any{"Debatt"}, "publishOnWeb": true, "series": nil,
+		},
 	}}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		v.mu.Lock()
 		defer v.mu.Unlock()
-		if r.URL.Path != "/api/videos/42" {
-			http.NotFound(w, r)
+		record, ok := v.records[r.URL.Path]
+		if !ok {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"type":"client_error","errors":[{"code":"not_found","detail":"Not found.","attr":null}]}`))
 			return
 		}
 		v.methods = append(v.methods, r.Method)
+		v.requests = append(v.requests, r.Method+" "+r.URL.Path)
 		if r.Method == http.MethodPut || r.Method == http.MethodPatch {
 			var body map[string]any
 			raw, _ := io.ReadAll(r.Body)
@@ -54,12 +65,12 @@ func newVideoAPI(t *testing.T) *videoAPI {
 			}
 			for key, value := range body {
 				if key != "id" && key != "series" {
-					v.record[key] = value
+					record[key] = value
 				}
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(v.record)
+		_ = json.NewEncoder(w).Encode(record)
 	}))
 	t.Cleanup(server.Close)
 	v.fakeAPI = &fakeAPI{Server: server}
