@@ -57,6 +57,20 @@ fk video view 12345                                     # title, org, series, va
 `create` and `upload` wait for ingest to finish unless given `--no-wait`. If one fails
 part-way, the error ends with a `hint:` line naming the command to carry on with.
 
+### Editing a video's metadata
+
+```sh
+fk video patch 12345 -d "A better description"     # change just the fields given
+fk video patch 12345 -t "New title" -c Kultur -c Debatt
+echo '{"publishOnWeb": false}' | fk video patch 12345   # any field, as JSON on stdin
+fk video get 12345 > video.json                     # the whole record, as the API holds it
+fk video put 12345 video.json                       # send an edited record back
+```
+
+`get` prints the API's own field names, so its output can go straight back into `put` or
+`patch`; read-only fields such as `organization` and `series` are ignored on the way in.
+Change the series with `seriesId` (or `--series`; `--series 0` takes the video out of it).
+
 ### Downloading a video's files
 
 ```sh

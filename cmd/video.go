@@ -19,6 +19,9 @@ func newVideoCmd() *cobra.Command {
 		newVideoUploadCmd(),
 		newVideoStatusCmd(),
 		newVideoViewCmd(),
+		newVideoGetCmd(),
+		newVideoPutCmd(),
+		newVideoPatchCmd(),
 		newVideoDownloadCmd(),
 	)
 	return cmd

@@ -39,6 +39,8 @@ var dataCommands = []string{
 	"fk video upload",
 	"fk video status",
 	"fk video view",
+	"fk video put",
+	"fk video patch",
 	"fk video download",
 	"fk archive backfill",
 	"fk archive refresh-metadata",
