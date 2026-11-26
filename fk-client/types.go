@@ -38,13 +38,6 @@ type CreateVideoRequest struct {
 	SeriesId *int
 }
 
-// VideoUploadToken authorizes an upload of a video's file, as returned by
-// GET /api/videos/{id}/upload_token.
-type VideoUploadToken struct {
-	UploadToken string
-	UploadURL   string
-}
-
 // IngestJob reports the ingest pipeline's progress for a video's uploaded
 // file, as returned by GET /api/videos/{id}/ingest.
 type IngestJob struct {

@@ -21,14 +21,15 @@ func (c *Client) Upload(ctx context.Context, videoId int, filespec string) error
 	return c.UploadWithProgress(ctx, videoId, filespec, nil)
 }
 
-// UploadWithProgress fetches an upload token for videoId and streams filespec
-// to the ingest server over tus, tagging the upload with the fields its
-// pre-create hook requires: videoID, origFileName and uploadToken. If
-// progress is non-nil it is called as each chunk lands.
+// UploadWithProgress streams filespec to the ingest server over tus, tagging
+// the upload with the fields its pre-create hook requires (videoID and
+// origFileName) and sending this client's API token, which ingest checks
+// with the server before accepting the upload. If progress is non-nil it is
+// called as each chunk lands.
 func (c *Client) UploadWithProgress(ctx context.Context, videoId int, filespec string, progress ProgressFunc) error {
-	token, err := c.UploadToken(ctx, videoId)
+	uploadURL, err := c.UploadURL(ctx, videoId)
 	if err != nil {
-		return fmt.Errorf("fetching upload token: %w", err)
+		return fmt.Errorf("fetching upload endpoint: %w", err)
 	}
 
 	f, err := os.Open(filespec)
@@ -45,13 +46,13 @@ func (c *Client) UploadWithProgress(ctx context.Context, videoId int, filespec s
 	metadata := tus.Metadata{
 		"videoID":      strconv.Itoa(videoId),
 		"origFileName": fi.Name(),
-		"uploadToken":  token.UploadToken,
 	}
 	fingerprint := fmt.Sprintf("%s-%d-%s", fi.Name(), fi.Size(), fi.ModTime())
 	upload := tus.NewUpload(f, fi.Size(), metadata, fingerprint)
 
 	config := tus.DefaultConfig()
-	tusClient, err := tus.NewClient(token.UploadURL, config)
+	config.Header.Set("Authorization", "Token "+c.token)
+	tusClient, err := tus.NewClient(uploadURL, config)
 	if err != nil {
 		return fmt.Errorf("creating tus client: %w", err)
 	}

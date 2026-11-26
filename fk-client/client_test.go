@@ -298,23 +298,22 @@ func TestClientCreateVideo(t *testing.T) {
 	}
 }
 
-func TestClientUploadToken(t *testing.T) {
+func TestClientUploadURL(t *testing.T) {
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/api/videos/42/upload_token" {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/videos/42/upload" {
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
 		writeJSON(w, http.StatusOK, map[string]string{
-			"uploadToken": "tok-xyz",
-			"uploadUrl":   "https://staging.frikanalen.tv/upload",
+			"uploadUrl": "https://staging.frikanalen.tv/upload",
 		})
 	})
 
-	token, err := c.UploadToken(context.Background(), 42)
+	url, err := c.UploadURL(context.Background(), 42)
 	if err != nil {
-		t.Fatalf("UploadToken: %v", err)
+		t.Fatalf("UploadURL: %v", err)
 	}
-	if token.UploadToken != "tok-xyz" || token.UploadURL != "https://staging.frikanalen.tv/upload" {
-		t.Errorf("unexpected token: %+v", token)
+	if url != "https://staging.frikanalen.tv/upload" {
+		t.Errorf("unexpected upload URL: %q", url)
 	}
 }
 
