@@ -57,6 +57,38 @@ fk video view 12345                                     # title, org, series, va
 `create` and `upload` wait for ingest to finish unless given `--no-wait`. If one fails
 part-way, the error ends with a `hint:` line naming the command to carry on with.
 
+### Editing a video's metadata
+
+```sh
+fk video edit 12345                                 # open it as YAML in $EDITOR, send what changed
+fk video patch 12345 -d "A better description"      # change just the fields given
+fk video get 12345 --yaml > video.yaml              # the whole record (JSON without --yaml)
+fk video apply video.yaml                           # send back what differs, like kubectl apply
+fk video apply descriptions.yaml --dry-run          # several videos at once, preview first
+```
+
+`get` prints the API's own field names, so its output can go straight back into `apply`,
+`put` or `patch`. Every command that reads a record takes JSON or YAML.
+
+`apply` works like a partial `kubectl apply`: each record names its video by `id`, only the
+fields it lists are touched, and only those that differ from the video as it stands are sent.
+Several records can go in one file as a YAML list, a `---`-separated stream or a JSON array:
+
+```yaml
+id: 12345
+description: |
+  Opptak fra årsmøtet.
+  Andre avsnitt.
+---
+id: 12346
+publishOnWeb: false
+```
+
+Read-only fields such as `organization` and `series` are skipped, with a warning if a record
+tried to change one; move a video to another series with `seriesId` (or `patch --series`,
+where `--series 0` takes it out). `put` sends a whole record and needs `name` and
+`categories`.
+
 ### Downloading a video's files
 
 ```sh
