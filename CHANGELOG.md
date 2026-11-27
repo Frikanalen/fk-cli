@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0](https://github.com/Frikanalen/fk-cli/compare/v0.4.0...v0.5.0) (2026-11-27)
+
+
+### Features
+
+* upload with the API token instead of a per-video upload token ([#22](https://github.com/Frikanalen/fk-cli/issues/22)) ([4ff07ac](https://github.com/Frikanalen/fk-cli/commit/4ff07acdf5f2a99c0e5e84a58fb5e0451f3fe37f))
+* **video:** manage video metadata (get, edit, apply, put, patch) ([#23](https://github.com/Frikanalen/fk-cli/issues/23)) ([317f1d3](https://github.com/Frikanalen/fk-cli/commit/317f1d3b8e0ff076dd6ef78e86b054a586cd499d))
+
 ## [0.4.0](https://github.com/Frikanalen/fk-cli/compare/v0.3.0...v0.4.0) (2026-11-13)
 
 
