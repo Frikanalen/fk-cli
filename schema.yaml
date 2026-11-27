@@ -15302,6 +15302,104 @@ paths:
               schema:
                 $ref: '#/components/schemas/IngestJob'
           description: ''
+  /api/videos/{id}/upload:
+    get:
+      operationId: videos_upload_retrieve
+      description: |-
+        Where to upload this video's file, for those allowed to.
+
+        Answering at all is the authorization: ingest asks this endpoint on
+        the uploader's behalf, with the uploader's own session cookie or API
+        token, before it accepts an upload. Allowed are staff and the
+        members of the video's organization, for a video they can see; a
+        removed video or a suspended organization's takes no uploads.
+      summary: Get a video's upload endpoint
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - videos
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideosUploadRetrieveErrorResponse400'
+          description: ''
+        '405':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse405'
+              examples:
+                MethodNotAllowed:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: method_not_allowed
+                      detail: Method "get" not allowed.
+                      attr: null
+          description: ''
+        '406':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse406'
+              examples:
+                NotAcceptable:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: not_acceptable
+                      detail: Could not satisfy the request Accept header.
+                      attr: null
+          description: ''
+        '415':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse415'
+              examples:
+                UnsupportedMediaType:
+                  value:
+                    type: client_error
+                    errors:
+                    - code: unsupported_media_type
+                      detail: Unsupported media type "application/json" in request.
+                      attr: null
+          description: ''
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse500'
+              examples:
+                APIException:
+                  value:
+                    type: server_error
+                    errors:
+                    - code: error
+                      detail: A server error occurred.
+                      attr: null
+          description: ''
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoUpload'
+          description: ''
+        '401':
+          description: Not signed in.
+        '403':
+          description: Not allowed to upload to this video.
+        '404':
+          description: No such video, or not one the caller can see.
   /api/videos/{id}/upload_token:
     get:
       operationId: videos_upload_token_retrieve
@@ -28953,6 +29051,15 @@ components:
       required:
       - categories
       - name
+    VideoUpload:
+      type: object
+      properties:
+        uploadUrl:
+          type: string
+          readOnly: true
+          default: http://localhost:1080/files/
+      required:
+      - uploadUrl
     VideoUploadToken:
       type: object
       properties:
@@ -32463,6 +32570,13 @@ components:
       required:
       - errors
       - type
+    VideosUploadRetrieveErrorResponse400:
+      oneOf:
+      - $ref: '#/components/schemas/ParseErrorResponse'
+      discriminator:
+        propertyName: type
+        mapping:
+          client_error: '#/components/schemas/ParseErrorResponse'
     VideosUploadTokenRetrieveErrorResponse400:
       oneOf:
       - $ref: '#/components/schemas/ParseErrorResponse'

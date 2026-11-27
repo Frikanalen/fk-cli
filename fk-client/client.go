@@ -256,7 +256,7 @@ func (c *Client) VideoURL(videoId int) string {
 }
 
 // CreateVideo creates a new video record and returns its ID. It does not
-// upload any file content; call UploadToken and Upload afterwards for that.
+// upload any file content; call Upload afterwards for that.
 func (c *Client) CreateVideo(ctx context.Context, req CreateVideoRequest) (int, error) {
 	body := apiclient.VideoCreateRequest{
 		Name:         req.Title,
@@ -277,21 +277,19 @@ func (c *Client) CreateVideo(ctx context.Context, req CreateVideoRequest) (int, 
 	return deref(resp.JSON201.Id), nil
 }
 
-// UploadToken fetches the capability that authorizes uploading a file for
-// the given video.
-func (c *Client) UploadToken(ctx context.Context, videoId int) (*VideoUploadToken, error) {
-	resp, err := c.api.VideosUploadTokenRetrieveWithResponse(ctx, videoId)
+// UploadURL returns the tus endpoint to upload a video's file to. The
+// server answers only callers allowed to upload to the video, and it is
+// the same check ingest makes, with this client's API token, when the
+// upload starts.
+func (c *Client) UploadURL(ctx context.Context, videoId int) (string, error) {
+	resp, err := c.api.VideosUploadRetrieveWithResponse(ctx, videoId)
 	if err != nil {
-		return nil, fmt.Errorf("performing request: %w", err)
+		return "", fmt.Errorf("performing request: %w", err)
 	}
 	if err := checkResponse(resp.StatusCode(), resp.Body); err != nil {
-		return nil, err
+		return "", err
 	}
-
-	return &VideoUploadToken{
-		UploadToken: deref(resp.JSON200.UploadToken),
-		UploadURL:   deref(resp.JSON200.UploadUrl),
-	}, nil
+	return deref(resp.JSON200.UploadUrl), nil
 }
 
 // IngestStatus reports how far the ingest pipeline has got with a video's

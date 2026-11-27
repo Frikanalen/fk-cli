@@ -250,7 +250,6 @@ func TestWaitForIngestRespectsContextCancellation(t *testing.T) {
 
 func TestUploadSendsExpectedMetadata(t *testing.T) {
 	const videoId = 42
-	const wantToken = "upload-tok-xyz"
 
 	f, err := os.CreateTemp(t.TempDir(), "fk-upload-*.mp4")
 	if err != nil {
@@ -270,22 +269,27 @@ func TestUploadSendsExpectedMetadata(t *testing.T) {
 	var serverURL string
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/videos/42/upload_token", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/videos/42/upload", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{
-			"uploadToken": wantToken,
-			"uploadUrl":   serverURL + "/upload",
+			"uploadUrl": serverURL + "/upload",
 		})
 	})
 	mux.HandleFunc("/upload", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("unexpected method creating upload: %s", r.Method)
 		}
+		// Ingest authorizes the upload by asking the API with this token.
+		if got := r.Header.Get("Authorization"); got != "Token test-token" {
+			t.Errorf("Authorization = %q, want the client's API token", got)
+		}
+		if _, ok := decodeUploadMetadata(t, r.Header.Get("Upload-Metadata"))["uploadToken"]; ok {
+			t.Error("Upload-Metadata still carries an uploadToken")
+		}
 
 		got := decodeUploadMetadata(t, r.Header.Get("Upload-Metadata"))
 		want := map[string]string{
 			"videoID":      strconv.Itoa(videoId),
 			"origFileName": wantFileName,
-			"uploadToken":  wantToken,
 		}
 		for k, v := range want {
 			if got[k] != v {
